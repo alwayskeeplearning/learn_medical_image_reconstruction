@@ -1,4 +1,5 @@
-import { join, dirname } from 'node:path';
+/* eslint-disable no-undef */
+import { join, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rspack } from '@rspack/core';
 import { globSync } from 'glob';
@@ -22,17 +23,20 @@ const polyfill = {
 };
 
 const getDemosEntries = () => {
-  const indexs = globSync('demos/*/index.ts');
+  const indexs = globSync('demos/**/index.ts');
   const htmlPlugins = [];
   const entries = indexs.reduce((ret, file) => {
-    const [, entry] = file.split('/');
-    ret[`demos/${entry}`] = resolve(file);
+    const entry = dirname(file);
+    ret[entry] = resolve(file);
+    const parts = entry.split(sep);
+    const newParts = parts.slice(1);
+    const filename = join(...newParts);
     htmlPlugins.push(
       new HtmlRspackPlugin({
-        template: resolve(`demos/${entry}/index.html`),
-        filename: `demos/${entry}/index.html`,
+        template: resolve(`${entry}/index.html`),
+        filename: `${filename}/index.html`,
         inject: 'body',
-        chunks: [`demos/${entry}`],
+        chunks: [entry],
       }),
     );
     return ret;

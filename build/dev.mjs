@@ -28,6 +28,18 @@ const dev = defineConfig({
     hot: true,
     // open: true,
     port: 2333,
+    setupMiddlewares: (middlewares, devServer) => {
+      if (!devServer) {
+        throw new Error('webpack-dev-server is not defined');
+      }
+
+      // 在这里拦截对 /favicon.ico 的请求
+      devServer.app.get('/favicon.ico', (req, res) => {
+        res.status(204).send(); // 发送 204 No Content 响应
+      });
+
+      return middlewares;
+    },
   },
   entry: {
     ...entries,
