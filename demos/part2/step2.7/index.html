@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>部分2 | 步骤2.7: Shader 中实现交互式窗宽窗位</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+        color: #fff;
+        font-family: sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      #controls {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 10px;
+        border-radius: 5px;
+      }
+      .control-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .control-row label {
+        width: 120px;
+      }
+      .control-row input {
+        width: 150px;
+      }
+      .control-row span {
+        margin-left: 10px;
+        width: 50px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 新增：UI 控制区域 -->
+    <div id="controls">
+      <div class="control-row">
+        <label for="window-width">窗宽 (Window Width)</label>
+        <input type="range" id="window-width" min="1" max="4096" value="400" />
+        <span id="ww-value">400</span>
+      </div>
+      <div class="control-row">
+        <label for="window-level">窗位 (Window Level)</label>
+        <input type="range" id="window-level" min="-1024" max="3071" value="40" />
+        <span id="wl-value">40</span>
+      </div>
+    </div>
+  </body>
+</html>
