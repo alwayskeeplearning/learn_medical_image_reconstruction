@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Part 1.6: Render DICOM with Canvas2D</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 2em;
+        display: flex;
+        gap: 2em;
+      }
+      .controls {
+        width: 300px;
+      }
+      pre {
+        background-color: #eee;
+        padding: 1em;
+        border-radius: 5px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      canvas {
+        border: 1px solid #ccc;
+        background-color: black;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      <h1>步骤 1.6: 使用 Canvas2D 渲染 DICOM</h1>
+      <p>选择一个本地 DICOM 文件，它将被渲染到右侧的画布上。</p>
+      <input type="file" id="file-input" />
+      <hr />
+      <h2>当前影像信息:</h2>
+      <pre id="info-dump">没有文件加载。</pre>
+    </div>
+    <div class="viewer">
+      <canvas id="canvas"></canvas>
+    </div>
+  </body>
+</html>
