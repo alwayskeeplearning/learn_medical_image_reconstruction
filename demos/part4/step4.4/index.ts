@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+// 核心改造：将 OrbitControls 替换为 TrackballControls
+import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
 import { GUI } from 'dat.gui';
 import dicomParser from 'dicom-parser';
 
@@ -168,9 +169,21 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 const container = document.getElementById('dicom-viewer')!;
 container.appendChild(renderer.domElement);
 camera.up.set(0, -1, 0); // Example: Z-axis as up
-const controls = new OrbitControls(camera, renderer.domElement);
+
+// 核心改造：实例化 TrackballControls
+const controls = new TrackballControls(camera, renderer.domElement);
+// --- TrackballControls 的属性与 OrbitControls 不同 ---
+// 禁用平移
+controls.noPan = true;
+// 可以设置旋转、缩放、平移的速度
+controls.rotateSpeed = 5.0;
+controls.zoomSpeed = 1.2;
+// --- 新增：开启并设置惯性 ---
+controls.staticMoving = false; // 默认为 false，这里显式写出以强调
+controls.dynamicDampingFactor = 0.3; // 设置一个合适的阻尼系数 0 到 1 之间，默认为 0.2 越小惯性越明显
+
 // --- 新增：禁用平移功能 ---
-controls.enablePan = false;
+// controls.enablePan = false;
 
 // --- 主逻辑 ---
 async function main() {
@@ -234,7 +247,8 @@ async function main() {
   // 我们将相机放置在影像中心Z轴"头顶"方向的一个合适距离外，并看向影像中心
   camera.position.copy(centerPatient).add(new THREE.Vector3(0, 0, -diagonal * 1.5));
   controls.target.copy(centerPatient);
-  controls.position0.copy(camera.position); // 设置reset位置
+  // 核心修正：移除 OrbitControls 特有的 position0 属性，TrackballControls 会自动记录初始状态
+  // controls.position0.copy(camera.position); // 设置reset位置
   controls.update(); // 让控制器更新其内部状态
 
   const material = new THREE.ShaderMaterial({
