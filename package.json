@@ -58,10 +58,12 @@
     "@rspack/cli": "1.1.1",
     "@rspack/core": "1.1.1",
     "@rspack/plugin-react-refresh": "1.0.0",
+    "@types/dat.gui": "0.7.13",
     "@types/eslint__js": "8.42.3",
     "@types/node": "22.10.1",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
+    "@types/three": "0.179.0",
     "antd": "4.24.16",
     "anywhere": "1.6.0",
     "bundle-declarations-webpack-plugin": "5.1.1",
@@ -88,8 +90,8 @@
     "webpack-node-externals": "3.0.0"
   },
   "dependencies": {
-    "@types/three": "0.179.0",
     "core-js": "3.39.0",
+    "dat.gui": "0.7.9",
     "dicom-parser": "1.8.21",
     "three": "0.179.1"
   }
