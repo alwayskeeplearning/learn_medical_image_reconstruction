@@ -39,9 +39,8 @@ const loadDicoms = async (urls: string[]) => {
     slices.sort((a, b) => {
       const posA = new Vector3(a.imagePositionPatient[0], a.imagePositionPatient[1], a.imagePositionPatient[2]);
       const posB = new Vector3(b.imagePositionPatient[0], b.imagePositionPatient[1], b.imagePositionPatient[2]);
-      // // 从大到小从头到脚排序
-      // return posB.dot(normal) - posA.dot(normal);
-      return posA.dot(normal) - posB.dot(normal);
+      // 从大到小从头到脚排序
+      return posB.dot(normal) - posA.dot(normal);
     });
 
     const width = firstDataSet.uint16('x00280011')!;

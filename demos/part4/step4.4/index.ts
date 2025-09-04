@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 // 核心改造：将 OrbitControls 替换为 TrackballControls
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
+// --- 新增：为 FXAA 引入后期处理相关模块 ---
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { GUI } from 'dat.gui';
 import dicomParser from 'dicom-parser';
 
@@ -164,11 +169,24 @@ let frustumSize = 0;
 // camera.position.set(0, 0, 1000); // 初始位置
 // camera.lookAt(0, 0, 0);
 
-const renderer = new THREE.WebGLRenderer();
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 const container = document.getElementById('dicom-viewer')!;
 container.appendChild(renderer.domElement);
-camera.up.set(0, -1, 0); // Example: Z-axis as up
+// 核心修正：设定相机的“上”方向为病人的前方(Anterior)，以获得符合放射学惯例的视角
+camera.up.set(0, -1, 0);
+
+// --- 新增：设置后期处理 ---
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const fxaaPass = new ShaderPass(FXAAShader);
+const pixelRatio = renderer.getPixelRatio();
+fxaaPass.material.uniforms['resolution'].value.x = 1 / (container.offsetWidth * pixelRatio);
+fxaaPass.material.uniforms['resolution'].value.y = 1 / (container.offsetHeight * pixelRatio);
+composer.addPass(fxaaPass);
 
 // 核心改造：实例化 TrackballControls
 const controls = new TrackballControls(camera, renderer.domElement);
@@ -180,7 +198,7 @@ controls.rotateSpeed = 5.0;
 controls.zoomSpeed = 1.2;
 // --- 新增：开启并设置惯性 ---
 controls.staticMoving = false; // 默认为 false，这里显式写出以强调
-controls.dynamicDampingFactor = 0.3; // 设置一个合适的阻尼系数 0 到 1 之间，默认为 0.2 越小惯性越明显
+controls.dynamicDampingFactor = 0.8; // 设置一个合适的阻尼系数 0 到 1 之间，默认为 0.2 越小惯性越明显
 
 // --- 新增：禁用平移功能 ---
 // controls.enablePan = false;
@@ -276,8 +294,8 @@ async function main() {
   // --- 轴位 (Axial) ---
   const axialNormal = new THREE.Vector3(0, 0, 1);
   const axialMaterial = material.clone();
-  axialMaterial.uniforms.uXAxis.value.set(1, 0, 0); // +X (Left)
-  axialMaterial.uniforms.uYAxis.value.set(0, 1, 0); // -Y (Anterior)
+  axialMaterial.uniforms.uXAxis.value.set(1, 0, 0);
+  axialMaterial.uniforms.uYAxis.value.set(0, 1, 0);
   const axialPlane = new THREE.Mesh(planeGeometry, axialMaterial);
   scene.add(axialPlane);
 
@@ -428,7 +446,8 @@ function setupGui(
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
-  renderer.render(scene, camera);
+  // 核心修正：使用 composer 进行渲染，以应用后期处理效果
+  composer.render();
 }
 
 main().catch(console.error);
@@ -446,4 +465,9 @@ window.addEventListener('resize', () => {
   camera.bottom = frustumSize / -2;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
+  // --- 新增：更新 composer 和 fxaaPass 的尺寸 ---
+  composer.setSize(w, h);
+  const pixelRatio = renderer.getPixelRatio();
+  fxaaPass.material.uniforms['resolution'].value.x = 1 / (w * pixelRatio);
+  fxaaPass.material.uniforms['resolution'].value.y = 1 / (h * pixelRatio);
 });
