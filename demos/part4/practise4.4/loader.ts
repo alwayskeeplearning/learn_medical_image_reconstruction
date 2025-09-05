@@ -22,6 +22,7 @@ const loadDicoms = async (urls: string[]) => {
     const slices = arrayBuffers.map(buffer => {
       const byteArray = new Uint8Array(buffer);
       const dataSet = dicomParser.parseDicom(byteArray);
+
       const imagePositionPatient = dataSet.string('x00200032')!.split('\\').map(Number);
       return {
         dataSet,
@@ -30,6 +31,16 @@ const loadDicoms = async (urls: string[]) => {
     });
 
     const firstDataSet = slices[0].dataSet;
+    const imagePositionPatient = slices[0].imagePositionPatient;
+    const pixelSpacing = firstDataSet.string('x00280030')!.split('\\').map(Number);
+    const sliceThickness = Number(firstDataSet.string('x00180050'));
+    const spacingBetweenSlices = slices.length > 1 ? new Vector3().fromArray(slices[0].imagePositionPatient).distanceTo(new Vector3().fromArray(slices[1].imagePositionPatient)) : sliceThickness;
+    // 健壮性处理：检查窗宽窗位是否存在，并处理多值情况
+    const windowWidthStr = firstDataSet.string('x00281051');
+    const windowCenterStr = firstDataSet.string('x00281050');
+    // 如果标签存在，则取第一个值；否则使用默认值
+    const windowWidth = windowWidthStr ? Number(windowWidthStr.split('\\')[0]) : 400;
+    const windowCenter = windowCenterStr ? Number(windowCenterStr.split('\\')[0]) : 40;
     const imageOrientationPatient = firstDataSet.string('x00200037')!.split('\\').map(Number);
     const rowCosines = new Vector3(imageOrientationPatient[0], imageOrientationPatient[1], imageOrientationPatient[2]);
     const colCosines = new Vector3(imageOrientationPatient[3], imageOrientationPatient[4], imageOrientationPatient[5]);
@@ -82,7 +93,16 @@ const loadDicoms = async (urls: string[]) => {
     texture.unpackAlignment = 1;
     texture.needsUpdate = true;
     console.log('3D纹理构建完毕。');
-    return texture;
+    const metaData = {
+      imageOrientationPatient,
+      imagePositionPatient,
+      pixelSpacing,
+      sliceThickness,
+      spacingBetweenSlices,
+      windowWidth: isNaN(windowWidth) ? 400 : windowWidth,
+      windowCenter: isNaN(windowCenter) ? 40 : windowCenter,
+    };
+    return { texture, metaData };
   } catch (error) {
     console.error('加载或处理 DICOM 序列时出错:', error);
   }
@@ -90,8 +110,8 @@ const loadDicoms = async (urls: string[]) => {
 
 const loadDicomSeries = async () => {
   const urls = generateDownloadUrls();
-  const volumeTexture = await loadDicoms(urls);
-  return volumeTexture;
+  const ret = await loadDicoms(urls);
+  return ret!;
 };
 
 export { loadDicomSeries };

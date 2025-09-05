@@ -263,7 +263,7 @@ async function main() {
 
   // --- 核心修正：根据数据大小和中心点，重新定位相机和控制器 ---
   // 我们将相机放置在影像中心Z轴"头顶"方向的一个合适距离外，并看向影像中心
-  camera.position.copy(centerPatient).add(new THREE.Vector3(0, 0, -diagonal * 1.5));
+  camera.position.copy(centerPatient).add(new THREE.Vector3(-200, -200, -diagonal * 1.5));
   controls.target.copy(centerPatient);
   // 核心修正：移除 OrbitControls 特有的 position0 属性，TrackballControls 会自动记录初始状态
   // controls.position0.copy(camera.position); // 设置reset位置
