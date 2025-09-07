@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>二维投影交互演示 (完整版)</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #f0f0f0;
+        font-family: sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(255, 255, 255, 0.85);
+        padding: 10px;
+        border-radius: 5px;
+        width: 280px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info">
+      <p>拖动鼠标改变 <span style="color: orange; font-weight: bold">方向向量 N</span></p>
+      <div id="dot-product-info"></div>
+      <div id="projection-results-info"></div>
+      <div id="sampling-info"></div>
+    </div>
+    <canvas id="projectionCanvas"></canvas>
+    <script>
+      const canvas = document.getElementById('projectionCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const origin = { x: canvas.width / 2, y: canvas.height / 2 };
+
+      const rectCorners = [
+        { x: -150, y: -100 }, // A
+        { x: 150, y: -100 }, // B
+        { x: 150, y: 100 }, // C
+        { x: -150, y: 100 }, // D
+      ];
+
+      // 新增：定义像素间距
+      const pixelSpacing = { x: 20, y: 15 };
+
+      const dotProductInfo = document.getElementById('dot-product-info');
+      const projectionResultsInfo = document.getElementById('projection-results-info');
+      const samplingInfo = document.getElementById('sampling-info');
+      let mouse = { x: origin.x + 200, y: origin.y + 200 };
+
+      function drawArrow(x, y, color, label, lineWidth = 2.5) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+
+        const angle = Math.atan2(y, x);
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-10, -5);
+        ctx.lineTo(-10, 5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.rotate(-angle);
+        ctx.font = '16px Arial';
+        ctx.fillText(label, 15, 15);
+        ctx.restore();
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.translate(origin.x, origin.y);
+
+        // 绘制坐标轴
+        ctx.beginPath();
+        ctx.moveTo(-origin.x, 0);
+        ctx.lineTo(origin.x, 0);
+        ctx.strokeStyle = '#faa';
+        ctx.stroke();
+        ctx.fillText('X轴', origin.x - 40, -10);
+        ctx.beginPath();
+        ctx.moveTo(0, -origin.y);
+        ctx.lineTo(0, origin.y);
+        ctx.strokeStyle = '#afa';
+        ctx.stroke();
+        ctx.fillText('Y轴', 10, -origin.y + 20);
+
+        const mouseRel = { x: mouse.x - origin.x, y: mouse.y - origin.y };
+        const len = Math.sqrt(mouseRel.x * mouseRel.x + mouseRel.y * mouseRel.y) || 1;
+        const normal = { x: mouseRel.x / len, y: mouseRel.y / len };
+
+        ctx.beginPath();
+        ctx.moveTo(-normal.x * 2000, -normal.y * 2000);
+        ctx.lineTo(normal.x * 2000, normal.y * 2000);
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(rectCorners[0].x, rectCorners[0].y);
+        rectCorners.forEach((c, i) => {
+          if (i > 0) ctx.lineTo(c.x, c.y);
+          ctx.fillText(['A', 'B', 'C', 'D'][i], c.x + 5, c.y - 5);
+        });
+        ctx.closePath();
+        ctx.strokeStyle = 'blue';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        drawArrow(rectCorners[0].x, rectCorners[0].y, '#7b2cbf', 'OA', 1.5);
+        drawArrow(rectCorners[1].x, rectCorners[1].y, '#9d4ed9', 'OB', 1.5);
+        drawArrow(rectCorners[2].x, rectCorners[2].y, '#c77dff', 'OC', 1.5);
+        drawArrow(rectCorners[3].x, rectCorners[3].y, '#e0aaff', 'OD', 1.5);
+        drawArrow(normal.x * 100, normal.y * 100, 'orange', 'N');
+
+        // 新增：可视化像素间距
+        ctx.beginPath();
+        ctx.moveTo(10, 10);
+        ctx.lineTo(10 + pixelSpacing.x, 10);
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillText('xSpacing', 15 + pixelSpacing.x, 15);
+        ctx.beginPath();
+        ctx.moveTo(10, 15);
+        ctx.lineTo(10, 15 + pixelSpacing.y);
+        ctx.strokeStyle = 'green';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillText('ySpacing', 15, 30 + pixelSpacing.y);
+
+        let minProjection = Infinity,
+          maxProjection = -Infinity;
+        rectCorners.forEach(corner => {
+          const projectionLength = corner.x * normal.x + corner.y * normal.y;
+          minProjection = Math.min(minProjection, projectionLength);
+          maxProjection = Math.max(maxProjection, projectionLength);
+          const projectedPoint = { x: normal.x * projectionLength, y: normal.y * projectionLength };
+          ctx.beginPath();
+          ctx.moveTo(corner.x, corner.y);
+          ctx.lineTo(projectedPoint.x, projectedPoint.y);
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+          ctx.setLineDash([2, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        });
+
+        const totalThickness = maxProjection - minProjection;
+        const minPoint = { x: normal.x * minProjection, y: normal.y * minProjection };
+        const maxPoint = { x: normal.x * maxProjection, y: normal.y * maxProjection };
+        ctx.beginPath();
+        ctx.moveTo(minPoint.x, minPoint.y);
+        ctx.lineTo(maxPoint.x, maxPoint.y);
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 8;
+        ctx.stroke();
+
+        // 新增：计算采样间隔并可视化切片
+        const absNx = Math.abs(normal.x);
+        const absNy = Math.abs(normal.y);
+        const stepToCrossX = absNx < 1e-6 ? Infinity : pixelSpacing.x / absNx;
+        const stepToCrossY = absNy < 1e-6 ? Infinity : pixelSpacing.y / absNy;
+        const samplingInterval = Math.min(stepToCrossX, stepToCrossY);
+        const sliceCount = samplingInterval > 0 ? Math.floor(totalThickness / samplingInterval) : 0;
+
+        if (sliceCount > 0 && sliceCount < 1000) {
+          // 防止画太多线导致卡顿
+          for (let i = 0; i <= sliceCount; i++) {
+            const p = minProjection + i * samplingInterval;
+            const tickStart = { x: normal.x * p - normal.y * 5, y: normal.y * p + normal.x * 5 };
+            const tickEnd = { x: normal.x * p + normal.y * 5, y: normal.y * p - normal.x * 5 };
+            ctx.beginPath();
+            ctx.moveTo(tickStart.x, tickStart.y);
+            ctx.lineTo(tickEnd.x, tickEnd.y);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+
+        ctx.restore();
+
+        // 更新信息面板
+        const posVecA = rectCorners[0];
+        const projectionA = posVecA.x * normal.x + posVecA.y * normal.y;
+        dotProductInfo.innerHTML = `<b>点积 (A点):</b> OA⋅N = <b>${projectionA.toFixed(2)}</b>`;
+
+        projectionResultsInfo.innerHTML = `
+            <hr><b>总厚度:</b><br>
+            min/max: [${minProjection.toFixed(2)}, ${maxProjection.toFixed(2)}]<br>
+            总厚度: <b>${totalThickness.toFixed(2)}</b>
+        `;
+
+        samplingInfo.innerHTML = `
+            <hr><b>采样间隔 (Slice Thickness):</b><br>
+            沿N前进以穿过x栅格: ${stepToCrossX.toFixed(2)}<br>
+            沿N前进以穿过y栅格: ${stepToCrossY.toFixed(2)}<br>
+            采样间隔(取最小值): <b>${samplingInterval.toFixed(2)}</b><br>
+            <b>总切片数: ${sliceCount}</b>
+        `;
+      }
+
+      window.addEventListener('mousemove', e => {
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+        requestAnimationFrame(draw);
+      });
+
+      draw();
+    </script>
+  </body>
+</html>

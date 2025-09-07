@@ -10,5 +10,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   console.log(metaData);
 
-  viewer.init(texture);
+  viewer.init(texture, metaData);
 });

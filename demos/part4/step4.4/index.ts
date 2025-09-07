@@ -121,7 +121,10 @@ function getVolume(sortedSlices: DicomSlice[]): DicomVolume {
     let rawPixelData: Int16Array | Uint16Array | Uint8Array;
 
     if (bitsAllocated === 16) {
-      rawPixelData = pixelRepresentation === 1 ? new Int16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2) : new Uint16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+      rawPixelData =
+        pixelRepresentation === 1
+          ? new Int16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2)
+          : new Uint16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
     } else {
       rawPixelData = new Uint8Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length);
     }
@@ -242,7 +245,11 @@ async function main() {
 
   const { patientToVoxelMatrix } = calculateMatrices(metaData);
 
-  const physicalSize = new THREE.Vector3(metaData.pixelSpacing[0] * dimensions.width, metaData.pixelSpacing[1] * dimensions.height, metaData.sliceThickness * dimensions.depth);
+  const physicalSize = new THREE.Vector3(
+    metaData.pixelSpacing[0] * dimensions.width,
+    metaData.pixelSpacing[1] * dimensions.height,
+    metaData.sliceThickness * dimensions.depth,
+  );
   const diagonal = physicalSize.length();
 
   // --- 核心修正：根据数据大小调整相机视锥体 ---
@@ -259,7 +266,9 @@ async function main() {
   camera.far = diagonal * 4; // (相机距离1.5d + 物体半径0.5d) * 2倍安全边距
   camera.updateProjectionMatrix();
 
-  const centerPatient = new THREE.Vector3(0, 0, 0).fromArray(metaData.imagePositionPatient).add(new THREE.Vector3(physicalSize.x / 2, physicalSize.y / 2, physicalSize.z / 2));
+  const centerPatient = new THREE.Vector3(0, 0, 0)
+    .fromArray(metaData.imagePositionPatient)
+    .add(new THREE.Vector3(physicalSize.x / 2, physicalSize.y / 2, physicalSize.z / 2));
 
   // --- 核心修正：根据数据大小和中心点，重新定位相机和控制器 ---
   // 我们将相机放置在影像中心Z轴"头顶"方向的一个合适距离外，并看向影像中心
@@ -358,7 +367,24 @@ function calculateMatrices(metaData: DicomMetaData): { patientToVoxelMatrix: THR
   const S = metaData.pixelSpacing;
   const Z = metaData.sliceThickness;
 
-  voxelToPatientMatrix.set(xCos[0] * S[0], yCos[0] * S[1], zCos.x * Z, T[0], xCos[1] * S[0], yCos[1] * S[1], zCos.y * Z, T[1], xCos[2] * S[0], yCos[2] * S[1], zCos.z * Z, T[2], 0, 0, 0, 1);
+  voxelToPatientMatrix.set(
+    xCos[0] * S[0],
+    yCos[0] * S[1],
+    zCos.x * Z,
+    T[0],
+    xCos[1] * S[0],
+    yCos[1] * S[1],
+    zCos.y * Z,
+    T[1],
+    xCos[2] * S[0],
+    yCos[2] * S[1],
+    zCos.z * Z,
+    T[2],
+    0,
+    0,
+    0,
+    1,
+  );
 
   const patientToVoxelMatrix = new THREE.Matrix4().copy(voxelToPatientMatrix).invert();
   return { patientToVoxelMatrix };

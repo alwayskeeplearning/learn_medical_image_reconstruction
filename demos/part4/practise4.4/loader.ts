@@ -34,7 +34,10 @@ const loadDicoms = async (urls: string[]) => {
     const imagePositionPatient = slices[0].imagePositionPatient;
     const pixelSpacing = firstDataSet.string('x00280030')!.split('\\').map(Number);
     const sliceThickness = Number(firstDataSet.string('x00180050'));
-    const spacingBetweenSlices = slices.length > 1 ? new Vector3().fromArray(slices[0].imagePositionPatient).distanceTo(new Vector3().fromArray(slices[1].imagePositionPatient)) : sliceThickness;
+    const spacingBetweenSlices =
+      slices.length > 1
+        ? new Vector3().fromArray(slices[0].imagePositionPatient).distanceTo(new Vector3().fromArray(slices[1].imagePositionPatient))
+        : sliceThickness;
     // 健壮性处理：检查窗宽窗位是否存在，并处理多值情况
     const windowWidthStr = firstDataSet.string('x00281051');
     const windowCenterStr = firstDataSet.string('x00281050');
@@ -101,6 +104,11 @@ const loadDicoms = async (urls: string[]) => {
       spacingBetweenSlices,
       windowWidth: isNaN(windowWidth) ? 400 : windowWidth,
       windowCenter: isNaN(windowCenter) ? 40 : windowCenter,
+      width,
+      height,
+      depth,
+      rescaleSlope,
+      rescaleIntercept,
     };
     return { texture, metaData };
   } catch (error) {
