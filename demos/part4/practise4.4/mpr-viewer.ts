@@ -12,19 +12,43 @@ import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import { vertexShader } from './vertexShader';
 import { fragmentShader } from './fragmentShader';
 
+type TSizeInfo = {
+  size: number;
+  totalThickness: number;
+  samplingInterval: number;
+};
+
 class MPRViewer {
   private container: HTMLElement;
   private scene: TScene;
   private mprCamera: TOrthographicCamera;
   private renderer: TWebGLRenderer;
   private controls: TrackballControls;
-  private plane?: TMesh;
   private patientToVoxelMatrix: TMatrix4;
   private centerPatient: Vector3;
+  private axialPlane?: TMesh;
+  private coronalPlane?: TMesh;
   private sagittalPlane?: TMesh;
-  private sagittalMaterial?: TShaderMaterial;
+  private axialSizeInfo: TSizeInfo;
+  private coronalSizeInfo: TSizeInfo;
+  private sagittalSizeInfo: TSizeInfo;
   constructor(element: HTMLElement) {
     this.container = element;
+    this.axialSizeInfo = {
+      size: 0,
+      totalThickness: 0,
+      samplingInterval: 0,
+    };
+    this.coronalSizeInfo = {
+      size: 0,
+      totalThickness: 0,
+      samplingInterval: 0,
+    };
+    this.sagittalSizeInfo = {
+      size: 0,
+      totalThickness: 0,
+      samplingInterval: 0,
+    };
     this.patientToVoxelMatrix = new Matrix4();
     this.centerPatient = new Vector3();
     this.scene = new Scene();
@@ -103,8 +127,7 @@ class MPRViewer {
     );
     this.patientToVoxelMatrix = new Matrix4().copy(voxelToPatientMatrix).invert();
   }
-  // ... inside the MPRViewer class
-  getSliceCountForDirection(normal: Vector3, metaData: any): number {
+  getSliceCountForDirection(normal: Vector3, metaData: any) {
     const {
       pixelSpacing: [xSpacing, ySpacing],
       sliceThickness: zSpacing,
@@ -154,12 +177,20 @@ class MPRViewer {
 
     // 4. 计算总张数
     if (samplingInterval === 0 || samplingInterval === Infinity) {
-      return 0; // 如果间隔无效，返回0
+      return {
+        size: 0,
+        totalThickness: 0,
+        samplingInterval: 0,
+      }; // 如果间隔无效，返回0
     }
     console.log('totalThickness', totalThickness);
     console.log('samplingInterval', samplingInterval);
 
-    return Math.floor(totalThickness / samplingInterval);
+    return {
+      size: Math.floor(totalThickness / samplingInterval),
+      totalThickness,
+      samplingInterval,
+    };
   }
   init(texture: TData3DTexture, metaData: any) {
     this.calculateMatrices(metaData);
@@ -186,7 +217,7 @@ class MPRViewer {
     const centerVoxel = new Vector3((width - 1) / 2, (height - 1) / 2, (depth - 1) / 2);
     const voxelToPatientMatrix = new Matrix4().copy(this.patientToVoxelMatrix).invert();
     const centerPatient = centerVoxel.clone().applyMatrix4(voxelToPatientMatrix);
-    this.mprCamera.position.copy(centerPatient).add(new Vector3(250, -250, -diagonalSize * 1.5));
+    this.mprCamera.position.copy(centerPatient).add(new Vector3(250, -250, diagonalSize * 1.5));
     this.controls.target.copy(centerPatient);
     this.controls.update();
     this.centerPatient = centerPatient;
@@ -237,22 +268,60 @@ class MPRViewer {
     axialPlane.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), axialNormal);
     coronalPlane.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), coronalNormal);
     sagittalPlane.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), sagittalNormal);
+    this.axialPlane = axialPlane;
+    this.coronalPlane = coronalPlane;
     this.sagittalPlane = sagittalPlane;
-    this.sagittalMaterial = sagittalMaterial;
-    console.log(this.getSliceCountForDirection(sagittalNormal, metaData));
+    this.axialSizeInfo = this.getSliceCountForDirection(axialNormal, metaData);
+    this.coronalSizeInfo = this.getSliceCountForDirection(coronalNormal, metaData);
+    this.sagittalSizeInfo = this.getSliceCountForDirection(sagittalNormal, metaData);
+    return {
+      axialSize: this.axialSizeInfo.size,
+      coronalSize: this.coronalSizeInfo.size,
+      sagittalSize: this.sagittalSizeInfo.size,
+    };
   }
-  test(index: number) {
-    const i = index - 1 - (512 - 1) / 2;
+  setWWWC(windowWidth: number, windowCenter: number) {
+    const axialMaterial = this.axialPlane?.material as TShaderMaterial;
+    const coronalMaterial = this.coronalPlane?.material as TShaderMaterial;
+    const sagittalMaterial = this.sagittalPlane?.material as TShaderMaterial;
+    axialMaterial.uniforms.uWindowWidth.value = windowWidth;
+    axialMaterial.uniforms.uWindowCenter.value = windowCenter;
+    coronalMaterial.uniforms.uWindowWidth.value = windowWidth;
+    coronalMaterial.uniforms.uWindowCenter.value = windowCenter;
+    sagittalMaterial.uniforms.uWindowWidth.value = windowWidth;
+    sagittalMaterial.uniforms.uWindowCenter.value = windowCenter;
+  }
+  changeSlice(index: number, orientation: string) {
     const tempOrigin = new Vector3();
-    const sagittalNormal = new Vector3(1, 0, 0);
-    console.log(this.centerPatient);
+    const normal = new Vector3();
+    let size = 0;
+    let samplingInterval = 0;
+    let plane = null;
+    let material = null;
+    if (orientation === 'sagittal') {
+      size = this.sagittalSizeInfo.size;
+      samplingInterval = this.sagittalSizeInfo.samplingInterval;
+      normal.copy(new Vector3(1, 0, 0));
+      plane = this.sagittalPlane;
+      material = this.sagittalPlane?.material as TShaderMaterial;
+    } else if (orientation === 'coronal') {
+      size = this.coronalSizeInfo.size;
+      samplingInterval = this.coronalSizeInfo.samplingInterval;
+      normal.copy(new Vector3(0, 1, 0));
+      plane = this.coronalPlane;
+      material = this.coronalPlane?.material as TShaderMaterial;
+    } else {
+      size = this.axialSizeInfo.size;
+      samplingInterval = this.axialSizeInfo.samplingInterval;
+      normal.copy(new Vector3(0, 0, 1));
+      plane = this.axialPlane;
+      material = this.axialPlane?.material as TShaderMaterial;
+    }
 
-    // 移除 Math.floor 以获得更精确的物理位置
-    tempOrigin.copy(this.centerPatient).add(sagittalNormal.multiplyScalar(i * 0.650390625));
-    console.log(tempOrigin);
-
-    this.sagittalPlane?.position.copy(tempOrigin);
-    this.sagittalMaterial?.uniforms.uOrigin.value.copy(tempOrigin);
+    const i = index - 1 - (size - 1) / 2;
+    tempOrigin.copy(this.centerPatient).add(normal.multiplyScalar(i * samplingInterval));
+    plane?.position.copy(tempOrigin);
+    material?.uniforms.uOrigin.value.copy(tempOrigin);
   }
 }
 

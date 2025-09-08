@@ -53,7 +53,8 @@ const loadDicoms = async (urls: string[]) => {
     slices.sort((a, b) => {
       const posA = new Vector3(a.imagePositionPatient[0], a.imagePositionPatient[1], a.imagePositionPatient[2]);
       const posB = new Vector3(b.imagePositionPatient[0], b.imagePositionPatient[1], b.imagePositionPatient[2]);
-      return posA.dot(normal) - posB.dot(normal);
+      // return posA.dot(normal) - posB.dot(normal);
+      return posB.dot(normal) - posA.dot(normal);
     });
 
     const width = firstDataSet.uint16('x00280011')!;
@@ -100,7 +101,7 @@ const loadDicoms = async (urls: string[]) => {
       imageOrientationPatient,
       imagePositionPatient,
       pixelSpacing,
-      sliceThickness: 0.6999999999999886,
+      sliceThickness,
       spacingBetweenSlices,
       windowWidth: isNaN(windowWidth) ? 400 : windowWidth,
       windowCenter: isNaN(windowCenter) ? 40 : windowCenter,
