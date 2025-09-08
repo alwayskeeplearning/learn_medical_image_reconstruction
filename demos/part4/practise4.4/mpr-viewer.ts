@@ -5,6 +5,7 @@ import type {
   WebGLRenderer as TWebGLRenderer,
   Mesh as TMesh,
   Matrix4 as TMatrix4,
+  ShaderMaterial as TShaderMaterial,
 } from 'three';
 import { GLSL3, Mesh, PlaneGeometry, DoubleSide, ShaderMaterial, Vector3, Scene, OrthographicCamera, WebGLRenderer, AxesHelper, Matrix4 } from 'three';
 import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
@@ -19,9 +20,13 @@ class MPRViewer {
   private controls: TrackballControls;
   private plane?: TMesh;
   private patientToVoxelMatrix: TMatrix4;
+  private centerPatient: Vector3;
+  private sagittalPlane?: TMesh;
+  private sagittalMaterial?: TShaderMaterial;
   constructor(element: HTMLElement) {
     this.container = element;
     this.patientToVoxelMatrix = new Matrix4();
+    this.centerPatient = new Vector3();
     this.scene = new Scene();
 
     // MPR业务相机
@@ -151,6 +156,8 @@ class MPRViewer {
     if (samplingInterval === 0 || samplingInterval === Infinity) {
       return 0; // 如果间隔无效，返回0
     }
+    console.log('totalThickness', totalThickness);
+    console.log('samplingInterval', samplingInterval);
 
     return Math.floor(totalThickness / samplingInterval);
   }
@@ -175,14 +182,14 @@ class MPRViewer {
     this.mprCamera.far = diagonalSize * 4;
     this.mprCamera.updateProjectionMatrix();
 
-    const centerPatient = new Vector3(0, 0, 0)
-      .fromArray(metaData.imagePositionPatient)
-      .add(new Vector3(physicalSize.x / 2, physicalSize.y / 2, physicalSize.z / 2));
+    // 使用矩阵精确计算体素中心对应的病人坐标（(w-1)/2, (h-1)/2, (d-1)/2）
+    const centerVoxel = new Vector3((width - 1) / 2, (height - 1) / 2, (depth - 1) / 2);
+    const voxelToPatientMatrix = new Matrix4().copy(this.patientToVoxelMatrix).invert();
+    const centerPatient = centerVoxel.clone().applyMatrix4(voxelToPatientMatrix);
     this.mprCamera.position.copy(centerPatient).add(new Vector3(250, -250, -diagonalSize * 1.5));
     this.controls.target.copy(centerPatient);
     this.controls.update();
-    console.log(centerPatient);
-
+    this.centerPatient = centerPatient;
     const material = new ShaderMaterial({
       glslVersion: GLSL3,
       vertexShader,
@@ -203,7 +210,6 @@ class MPRViewer {
       },
       side: DoubleSide,
     });
-    console.log(metaData.windowCenter, metaData.windowWidth);
 
     const planeGeometry = new PlaneGeometry(diagonalSize, diagonalSize);
 
@@ -231,7 +237,22 @@ class MPRViewer {
     axialPlane.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), axialNormal);
     coronalPlane.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), coronalNormal);
     sagittalPlane.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), sagittalNormal);
-    console.log(this.getSliceCountForDirection(coronalNormal, metaData));
+    this.sagittalPlane = sagittalPlane;
+    this.sagittalMaterial = sagittalMaterial;
+    console.log(this.getSliceCountForDirection(sagittalNormal, metaData));
+  }
+  test(index: number) {
+    const i = index - 1 - (512 - 1) / 2;
+    const tempOrigin = new Vector3();
+    const sagittalNormal = new Vector3(1, 0, 0);
+    console.log(this.centerPatient);
+
+    // 移除 Math.floor 以获得更精确的物理位置
+    tempOrigin.copy(this.centerPatient).add(sagittalNormal.multiplyScalar(i * 0.650390625));
+    console.log(tempOrigin);
+
+    this.sagittalPlane?.position.copy(tempOrigin);
+    this.sagittalMaterial?.uniforms.uOrigin.value.copy(tempOrigin);
   }
 }
 

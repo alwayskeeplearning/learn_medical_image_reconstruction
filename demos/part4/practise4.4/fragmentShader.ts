@@ -25,13 +25,13 @@ const fragmentShader = `
     vec4 voxelPos4 = uPatientToVoxelMatrix * vec4(patientPos, 1.0);
     vec3 voxelPos = voxelPos4.xyz / voxelPos4.w;
 
-    if (voxelPos.x < 0.0 || voxelPos.x > uTextureSize.x - 1.0 ||
-        voxelPos.y < 0.0 || voxelPos.y > uTextureSize.y - 1.0 ||
-        voxelPos.z < 0.0 || voxelPos.z > uTextureSize.z - 1.0) {
+    if (voxelPos.x < -0.001 || voxelPos.x > uTextureSize.x - 1.0 + 0.001 ||
+        voxelPos.y < -0.001 || voxelPos.y > uTextureSize.y - 1.0 + 0.001 ||
+        voxelPos.z < -0.001 || voxelPos.z > uTextureSize.z - 1.0 + 0.001) {
       discard;
     }
     
-    vec3 sampleCoord = voxelPos / uTextureSize;
+    vec3 sampleCoord = (voxelPos + vec3(0.5)) / uTextureSize;
     float intensity = texture(uTexture, sampleCoord).r;
     
     float lower = uWindowCenter - uWindowWidth / 2.0;

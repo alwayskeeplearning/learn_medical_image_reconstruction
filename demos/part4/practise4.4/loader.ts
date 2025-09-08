@@ -95,12 +95,12 @@ const loadDicoms = async (urls: string[]) => {
     texture.magFilter = LinearFilter;
     texture.unpackAlignment = 1;
     texture.needsUpdate = true;
-    console.log('3D纹理构建完毕。');
+    console.log('3D纹理构建完毕。', spacingBetweenSlices);
     const metaData = {
       imageOrientationPatient,
       imagePositionPatient,
       pixelSpacing,
-      sliceThickness,
+      sliceThickness: 0.6999999999999886,
       spacingBetweenSlices,
       windowWidth: isNaN(windowWidth) ? 400 : windowWidth,
       windowCenter: isNaN(windowCenter) ? 40 : windowCenter,
