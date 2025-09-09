@@ -56,6 +56,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!texture) {
     return;
   }
+  console.log('metaData', metaData);
+  (window as any).viewer = viewer;
   const { axialSize, coronalSize, sagittalSize } = viewer.init(texture, metaData);
   setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialSize, coronalSize, sagittalSize);
 });

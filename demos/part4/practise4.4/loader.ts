@@ -1,24 +1,29 @@
 import dicomParser from 'dicom-parser';
 import { Vector3, Data3DTexture, RedFormat, FloatType, LinearFilter } from 'three';
+import data from './data.json';
+console.log(data);
 
 const generateDownloadUrls = () => {
-  const baseUrl = '/static/dicoms/CW023001-P001566398/';
-  const fileCount = 462;
-  const urls: string[] = [];
-  for (let i = 1; i <= fileCount; i++) {
-    const filename = `CW023001-P001566398-CT20200727153936_${String(i).padStart(4, '0')}.dcm`;
-    urls.push(baseUrl + filename);
-  }
+  // const baseUrl = '/static/dicoms/CW023001-P001566398/';
+  // const fileCount = 462;
+  // const urls: string[] = [];
+  // for (let i = 1; i <= fileCount; i++) {
+  //   const filename = `CW023001-P001566398-CT20200727153936_${String(i).padStart(4, '0')}.dcm`;
+  //   urls.push(baseUrl + filename);
+  // }
 
-  return urls;
+  // return urls;
+  return data.map(item => `http://172.16.8.5:8000/${item.storagePath}`);
 };
 
 const loadDicoms = async (urls: string[]) => {
   console.log(`开始加载 ${urls.length} 个 DICOM 文件...`);
   try {
+    console.time('loadDicoms');
     const responses = await Promise.all(urls.map(url => fetch(url)));
     const arrayBuffers = await Promise.all(responses.map(res => res.arrayBuffer()));
-
+    console.timeEnd('loadDicoms');
+    console.time('parseDicom');
     const slices = arrayBuffers.map(buffer => {
       const byteArray = new Uint8Array(buffer);
       const dataSet = dicomParser.parseDicom(byteArray);
@@ -29,7 +34,8 @@ const loadDicoms = async (urls: string[]) => {
         imagePositionPatient,
       };
     });
-
+    console.timeEnd('parseDicom');
+    console.time('getMetaData');
     const firstDataSet = slices[0].dataSet;
     const imagePositionPatient = slices[0].imagePositionPatient;
     const pixelSpacing = firstDataSet.string('x00280030')!.split('\\').map(Number);
@@ -81,11 +87,12 @@ const loadDicoms = async (urls: string[]) => {
       }
 
       const sliceOffsetStart = i * width * height;
+      // volumeData.set(rawPixelData, sliceOffsetStart);
       for (let j = 0; j < rawPixelData.length; j++) {
         volumeData[sliceOffsetStart + j] = rawPixelData[j] * rescaleSlope + rescaleIntercept;
       }
     });
-
+    console.timeEnd('getMetaData');
     console.log('体素数据体填充完毕。');
 
     console.log(`开始构建3D纹理...`);
@@ -96,7 +103,7 @@ const loadDicoms = async (urls: string[]) => {
     texture.magFilter = LinearFilter;
     texture.unpackAlignment = 1;
     texture.needsUpdate = true;
-    console.log('3D纹理构建完毕。', spacingBetweenSlices);
+    console.log('3D纹理构建完毕。');
     const metaData = {
       imageOrientationPatient,
       imagePositionPatient,
