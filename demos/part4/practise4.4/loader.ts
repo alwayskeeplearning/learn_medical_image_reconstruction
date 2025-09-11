@@ -4,15 +4,15 @@ import data from './data.json';
 console.log(data);
 
 const generateDownloadUrls = () => {
-  // const baseUrl = '/static/dicoms/CW023001-P001566398/';
-  // const fileCount = 462;
-  // const urls: string[] = [];
-  // for (let i = 1; i <= fileCount; i++) {
-  //   const filename = `CW023001-P001566398-CT20200727153936_${String(i).padStart(4, '0')}.dcm`;
-  //   urls.push(baseUrl + filename);
-  // }
+  const baseUrl = '/static/dicoms/CW023001-P001566398/';
+  const fileCount = 462;
+  const urls: string[] = [];
+  for (let i = 1; i <= fileCount; i++) {
+    const filename = `CW023001-P001566398-CT20200727153936_${String(i).padStart(4, '0')}.dcm`;
+    urls.push(baseUrl + filename);
+  }
 
-  // return urls;
+  return urls;
   return data.map(item => `http://172.16.8.5:8000/${item.storagePath}`);
 };
 
@@ -42,7 +42,9 @@ const loadDicoms = async (urls: string[]) => {
     const sliceThickness = Number(firstDataSet.string('x00180050'));
     const spacingBetweenSlices =
       slices.length > 1
-        ? new Vector3().fromArray(slices[0].imagePositionPatient).distanceTo(new Vector3().fromArray(slices[1].imagePositionPatient))
+        ? new Vector3()
+            .fromArray(slices[0].imagePositionPatient)
+            .distanceTo(new Vector3().fromArray(slices[1].imagePositionPatient))
         : sliceThickness;
     // 健壮性处理：检查窗宽窗位是否存在，并处理多值情况
     const windowWidthStr = firstDataSet.string('x00281051');
@@ -80,7 +82,11 @@ const loadDicoms = async (urls: string[]) => {
         if (pixelRepresentation === 1) {
           rawPixelData = new Int16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
         } else {
-          rawPixelData = new Uint16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+          rawPixelData = new Uint16Array(
+            slice.dataSet.byteArray.buffer,
+            pixelDataElement.dataOffset,
+            pixelDataElement.length / 2,
+          );
         }
       } else {
         rawPixelData = new Uint8Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length);

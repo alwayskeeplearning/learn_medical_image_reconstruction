@@ -31,6 +31,7 @@ type TViewConfig = {
   camera: TOrthographicCamera;
   mesh: TMesh;
   normal: Vector3;
+  renderer: TWebGLRenderer;
 };
 
 type TSizeInfo = {
@@ -46,7 +47,6 @@ class MPRViewer {
   private axialElement: HTMLElement;
   private coronalElement: HTMLElement;
   private sagittalElement: HTMLElement;
-  private renderer: TWebGLRenderer;
   private voxelToPatientMatrix: TMatrix4;
   private patientToVoxelMatrix: TMatrix4;
   private viewConfigs: TViewConfig[];
@@ -64,9 +64,6 @@ class MPRViewer {
     this.axialElement = axialElement;
     this.coronalElement = coronalElement;
     this.sagittalElement = sagittalElement;
-    this.renderer = new WebGLRenderer({ antialias: true });
-    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.container.appendChild(this.renderer.domElement);
 
     this.animate();
     this.attachEvent();
@@ -83,6 +80,9 @@ class MPRViewer {
     const axialPlane = new Mesh(axialPlaneGeometry, axialMaterial);
     const axialScene = new Scene();
     axialScene.add(axialPlane);
+    const axialRenderer = new WebGLRenderer({ antialias: true });
+    axialRenderer.setSize(this.axialElement.clientWidth, this.axialElement.clientHeight);
+    this.axialElement.appendChild(axialRenderer.domElement);
     const axialConfig: TViewConfig = {
       name: 'Axial',
       element: this.axialElement,
@@ -90,6 +90,7 @@ class MPRViewer {
       camera: axialCamera,
       mesh: axialPlane,
       normal: new Vector3(0, 0, 1),
+      renderer: axialRenderer,
     };
 
     const coronalCamera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1);
@@ -103,6 +104,9 @@ class MPRViewer {
     const coronalPlane = new Mesh(coronalPlaneGeometry, coronalMaterial);
     const coronalScene = new Scene();
     coronalScene.add(coronalPlane);
+    const coronalRenderer = new WebGLRenderer({ antialias: true });
+    coronalRenderer.setSize(this.coronalElement.clientWidth, this.coronalElement.clientHeight);
+    this.coronalElement.appendChild(coronalRenderer.domElement);
     const coronalConfig: TViewConfig = {
       name: 'Coronal',
       element: this.coronalElement,
@@ -110,6 +114,7 @@ class MPRViewer {
       camera: coronalCamera,
       mesh: coronalPlane,
       normal: new Vector3(0, 1, 0),
+      renderer: coronalRenderer,
     };
     const sagittalCamera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1);
     sagittalCamera.position.set(0, 0, 1);
@@ -122,6 +127,9 @@ class MPRViewer {
     const sagittalPlane = new Mesh(sagittalPlaneGeometry, sagittalMaterial);
     const sagittalScene = new Scene();
     sagittalScene.add(sagittalPlane);
+    const sagittalRenderer = new WebGLRenderer({ antialias: true });
+    sagittalRenderer.setSize(this.sagittalElement.clientWidth, this.sagittalElement.clientHeight);
+    this.sagittalElement.appendChild(sagittalRenderer.domElement);
     const sagittalConfig: TViewConfig = {
       name: 'Sagittal',
       element: this.sagittalElement,
@@ -129,54 +137,27 @@ class MPRViewer {
       camera: sagittalCamera,
       mesh: sagittalPlane,
       normal: new Vector3(1, 0, 0),
+      renderer: sagittalRenderer,
     };
 
     this.viewConfigs.push(axialConfig, coronalConfig, sagittalConfig);
   }
   animate() {
     requestAnimationFrame(this.animate.bind(this));
-
-    //启用剪裁检测
-    this.renderer.setScissorTest(true);
-
     this.viewConfigs.forEach(view => {
-      const { element, camera, scene } = view;
-      const rect = element.getBoundingClientRect();
-
-      // // 检查视图是否在屏幕外
-      // if (
-      //   rect.bottom < 0 ||
-      //   rect.top > this.renderer.domElement.clientHeight ||
-      //   rect.right < 0 ||
-      //   rect.left > this.renderer.domElement.clientWidth
-      // ) {
-      //   return;
-      // }
-
-      const width = rect.right - rect.left;
-      const height = rect.bottom - rect.top;
-      const left = rect.left;
-      //WebGL的y = 画布总高度 - 元素底部到浏览器顶部的距离
-      const bottom = this.renderer.domElement.clientHeight - rect.bottom;
-      this.renderer.setViewport(left, bottom, width, height);
-      this.renderer.setScissor(left, bottom, width, height);
-      this.renderer.render(scene, camera);
+      const { renderer, scene, camera } = view;
+      renderer.render(scene, camera);
     });
   }
   handleResize() {
-    const { clientWidth, clientHeight } = this.container;
-
-    // 更新渲染器尺寸和canvas css尺寸
-    this.renderer.setSize(clientWidth, clientHeight);
-
     // 更新每个视图的相机
     this.viewConfigs.forEach(view => {
-      const { element, camera, mesh } = view;
+      const { element, camera, mesh, renderer } = view;
       const rect = element.getBoundingClientRect();
 
       // 检查尺寸是否为0，避免无效计算
       if (rect.width === 0 || rect.height === 0) return;
-
+      renderer.setSize(rect.width, rect.height);
       // 更新相机视锥体以匹配平面尺寸和元素宽高比
       const planeWidth = (mesh.material as TShaderMaterial).uniforms.uPlaneWidth.value;
       const planeHeight = (mesh.material as TShaderMaterial).uniforms.uPlaneHeight.value;
