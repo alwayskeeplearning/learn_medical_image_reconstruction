@@ -133,7 +133,10 @@ function getVolume(sortedSlices: DicomSlice[]): DicomVolume {
     let rawPixelData: Int16Array | Uint16Array | Uint8Array;
 
     if (bitsAllocated === 16) {
-      rawPixelData = pixelRepresentation === 1 ? new Int16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2) : new Uint16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
+      rawPixelData =
+        pixelRepresentation === 1
+          ? new Int16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2)
+          : new Uint16Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length / 2);
     } else {
       rawPixelData = new Uint8Array(slice.dataSet.byteArray.buffer, pixelDataElement.dataOffset, pixelDataElement.length);
     }
@@ -175,7 +178,24 @@ function calculateMatrices(metaData: DicomMetaData, zSpacing: number): { patient
   // 修正：使用传入的、精确计算的zSpacing，而不是元数据中的sliceThickness
   const Z = zSpacing;
 
-  voxelToPatientMatrix.set(xCos[0] * S[0], yCos[0] * S[1], zCos.x * Z, T[0], xCos[1] * S[0], yCos[1] * S[1], zCos.y * Z, T[1], xCos[2] * S[0], yCos[2] * S[1], zCos.z * Z, T[2], 0, 0, 0, 1);
+  voxelToPatientMatrix.set(
+    xCos[0] * S[0],
+    yCos[0] * S[1],
+    zCos.x * Z,
+    T[0],
+    xCos[1] * S[0],
+    yCos[1] * S[1],
+    zCos.y * Z,
+    T[1],
+    xCos[2] * S[0],
+    yCos[2] * S[1],
+    zCos.z * Z,
+    T[2],
+    0,
+    0,
+    0,
+    1,
+  );
 
   const patientToVoxelMatrix = new THREE.Matrix4().copy(voxelToPatientMatrix).invert();
   return { patientToVoxelMatrix };
@@ -200,7 +220,10 @@ async function main() {
   // DICOM 数据加载 (与之前一致)
   const baseUrl = '/static/dicoms/CW023001-P001566398/';
   const fileCount = 462;
-  const urls = Array.from({ length: fileCount }, (_, i) => baseUrl + `CW023001-P001566398-CT20200727153936_${String(i + 1).padStart(4, '0')}.dcm`);
+  const urls = Array.from(
+    { length: fileCount },
+    (_, i) => baseUrl + `CW023001-P001566398-CT20200727153936_${String(i + 1).padStart(4, '0')}.dcm`,
+  );
   const arrayBuffers = await Promise.all(urls.map(url => fetch(url).then(res => res.arrayBuffer())));
   const dicomSlices = arrayBuffers.map((buffer, index) => {
     const dataSet = dicomParser.parseDicom(new Uint8Array(buffer));
@@ -220,7 +243,12 @@ async function main() {
   texture.needsUpdate = true;
 
   // --- 核心修正：计算精确的Z轴间距 ---
-  const accurateZSpacing = sortedSlices.length > 1 ? new THREE.Vector3().fromArray(sortedSlices[0].imagePosition).distanceTo(new THREE.Vector3().fromArray(sortedSlices[1].imagePosition)) : metaData.sliceThickness;
+  const accurateZSpacing =
+    sortedSlices.length > 1
+      ? new THREE.Vector3()
+          .fromArray(sortedSlices[0].imagePosition)
+          .distanceTo(new THREE.Vector3().fromArray(sortedSlices[1].imagePosition))
+      : metaData.sliceThickness;
 
   // --- 核心修正：将 centerPatient 提升为可变状态 ---
   const centerPatient = new THREE.Vector3();
@@ -239,11 +267,17 @@ async function main() {
   const updateGeometriesAndMatrices = (useAccurate: boolean) => {
     const zSpacing = useAccurate ? accurateZSpacing : metaData.sliceThickness;
 
-    const physicalSize = new THREE.Vector3(metaData.pixelSpacing[0] * dimensions.width, metaData.pixelSpacing[1] * dimensions.height, zSpacing * dimensions.depth);
+    const physicalSize = new THREE.Vector3(
+      metaData.pixelSpacing[0] * dimensions.width,
+      metaData.pixelSpacing[1] * dimensions.height,
+      zSpacing * dimensions.depth,
+    );
     const { patientToVoxelMatrix } = calculateMatrices(metaData, zSpacing);
 
     // --- 核心修正：实时更新 centerPatient ---
-    centerPatient.fromArray(metaData.imagePositionPatient).add(new THREE.Vector3(physicalSize.x / 2, physicalSize.y / 2, physicalSize.z / 2));
+    centerPatient
+      .fromArray(metaData.imagePositionPatient)
+      .add(new THREE.Vector3(physicalSize.x / 2, physicalSize.y / 2, physicalSize.z / 2));
 
     // 更新所有视图的变换矩阵
     views.forEach(v => {
@@ -293,7 +327,12 @@ async function main() {
   // --- 初始创建 ---
   // 注意：初始创建时的值都会被首次调用 updateGeometriesAndMatrices 覆盖，所以这里的计算可以简化或移除
   const { patientToVoxelMatrix } = calculateMatrices(metaData, metaData.sliceThickness);
-  const initialPhysicalSize = new THREE.Vector3(metaData.pixelSpacing[0] * dimensions.width, metaData.pixelSpacing[1] * dimensions.height, metaData.sliceThickness * dimensions.depth);
+  const initialPhysicalSize = new THREE.Vector3(
+    metaData.pixelSpacing[0] * dimensions.width,
+    metaData.pixelSpacing[1] * dimensions.height,
+    metaData.sliceThickness * dimensions.depth,
+  );
+  console.log(initialPhysicalSize);
 
   // --- 核心改造: 为每个视图创建独立的场景和相机 ---
 
@@ -510,7 +549,12 @@ function animate() {
     const rect = element.getBoundingClientRect();
 
     // 检查视图是否在屏幕外
-    if (rect.bottom < 0 || rect.top > renderer.domElement.clientHeight || rect.right < 0 || rect.left > renderer.domElement.clientWidth) {
+    if (
+      rect.bottom < 0 ||
+      rect.top > renderer.domElement.clientHeight ||
+      rect.right < 0 ||
+      rect.left > renderer.domElement.clientWidth
+    ) {
       return; // 不渲染
     }
 
