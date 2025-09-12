@@ -1,0 +1,73 @@
+import { MPRViewer } from './mpr-viewer';
+import { loadDicomSeries } from './loader';
+import { GUI } from 'dat.gui';
+
+const guiState = {
+  windowWidth: 1200,
+  windowCenter: -600,
+  axialOffset: 0,
+  coronalOffset: 0,
+  sagittalOffset: 0,
+};
+
+const setupGui = (
+  viewer: MPRViewer,
+  windowWidth: number,
+  windowCenter: number,
+  axialCount: number,
+  coronalCount: number,
+  sagittalCount: number,
+) => {
+  const gui = new GUI();
+  guiState.windowWidth = windowWidth;
+  guiState.windowCenter = windowCenter;
+  guiState.axialOffset = axialCount / 2;
+  guiState.coronalOffset = coronalCount / 2;
+  guiState.sagittalOffset = sagittalCount / 2;
+  gui
+    .add(guiState, 'windowWidth', 1, 3000, 1)
+    .name('窗宽')
+    .onChange(() => {
+      viewer.setWWWC(guiState.windowWidth, guiState.windowCenter);
+    });
+  gui
+    .add(guiState, 'windowCenter', -3000, 3000, 1)
+    .name('窗位')
+    .onChange(() => {
+      viewer.setWWWC(guiState.windowWidth, guiState.windowCenter);
+    });
+  gui
+    .add(guiState, 'axialOffset', 1, axialCount, 1)
+    .name('轴位切片')
+    .onChange(() => {
+      viewer.changeSlice(guiState.axialOffset, 'axial');
+    });
+  gui
+    .add(guiState, 'coronalOffset', 1, coronalCount, 1)
+    .name('冠状位切片')
+    .onChange(() => {
+      viewer.changeSlice(guiState.coronalOffset, 'coronal');
+    });
+  gui
+    .add(guiState, 'sagittalOffset', 1, sagittalCount, 1)
+    .name('矢状位切片')
+    .onChange(() => {
+      viewer.changeSlice(guiState.sagittalOffset, 'sagittal');
+    });
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const container = document.getElementById('mpr-container') as HTMLElement;
+  const axialElement = document.getElementById('axial-view') as HTMLElement;
+  const coronalElement = document.getElementById('coronal-view') as HTMLElement;
+  const sagittalElement = document.getElementById('sagittal-view') as HTMLElement;
+  const viewer = new MPRViewer(container, axialElement, coronalElement, sagittalElement);
+  const { texture, metaData } = await loadDicomSeries();
+  if (!texture) {
+    return;
+  }
+  console.log('metaData', metaData);
+  (window as any).viewer = viewer;
+  const { axialCount, coronalCount, sagittalCount } = viewer.init(texture, metaData);
+  setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialCount, coronalCount, sagittalCount);
+});
