@@ -6,7 +6,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 // --- 配置常量 ---
 const CENTER_GAP_PIXELS = 32; // 中心空隙大小 (单边)
 const DASH_ZONE_PIXELS = 128; // 从中心点到虚线末端的距离
-const HOT_ZONE_PADDING = 4; // 虚线抓手的像素范围 (单边)
+const HOT_ZONE_PADDING = 10; // 虚线抓手的像素范围 (单边)
 const LINE_WIDTH = 2;
 
 // 定义每个视图的配置信息
@@ -18,20 +18,37 @@ type ViewConfig = {
   camera: THREE.OrthographicCamera;
   uiScene: THREE.Scene;
   uiCamera: THREE.OrthographicCamera;
-  horizontalSolid: Line2;
-  verticalSolid: Line2;
+  // 实线部分被拆分为独立的线段
+  horizontalSolidLeft: Line2;
+  horizontalSolidRight: Line2;
+  verticalSolidTop: Line2;
+  verticalSolidBottom: Line2;
   horizontalDashedLeft: Line2;
   horizontalDashedRight: Line2;
   verticalDashedTop: Line2;
   verticalDashedBottom: Line2;
+  // 对应的热区线
+  horizontalSolidLeftHitbox: Line2;
+  horizontalSolidRightHitbox: Line2;
+  verticalSolidTopHitbox: Line2;
+  verticalSolidBottomHitbox: Line2;
+  horizontalDashedLeftHitbox: Line2;
+  horizontalDashedRightHitbox: Line2;
+  verticalDashedTopHitbox: Line2;
+  verticalDashedBottomHitbox: Line2;
 };
 
 class LinkedCrosshairsApp {
   private views: ViewConfig[] = [];
   // 核心状态变更为一个4x4矩阵
   private mprMatrix = new THREE.Matrix4();
+  private rotationAngle = 0; // 新增：存储十字线的旋转角度 (弧度)
+  private raycaster = new THREE.Raycaster(); // 新增 Raycaster 实例
   private isDragging = false;
-  private dragMode: 'center' | 'horizontal' | 'vertical' = 'center';
+  private dragMode: 'center' | 'horizontal' | 'vertical' | 'rotate' = 'center'; // 新增 'rotate'
+  private startDragAngle = 0; // 新增：开始拖拽时鼠标与中心的角度
+  private startRotation = 0; // 新增：开始拖拽时十字线的角度
+  private lastMousePosition = new THREE.Vector2(); // 新增：用于计算拖拽增量
 
   constructor() {
     // 初始化矩阵，使其位置在中心点
@@ -78,6 +95,8 @@ class LinkedCrosshairsApp {
       const uiCamera = new THREE.OrthographicCamera(0, element.clientWidth, element.clientHeight, 0, 0.1, 10);
       uiCamera.position.z = 1;
 
+      // --- 创建材质 ---
+      // 可见线材质
       let hMat: LineMaterial, vMat: LineMaterial;
 
       switch (config.name) {
@@ -94,12 +113,9 @@ class LinkedCrosshairsApp {
           vMat = new LineMaterial({ color: colors.Coronal, linewidth: LINE_WIDTH, dashed: false });
           break;
       }
-
-      // 设置材质的分辨率
       hMat.resolution.set(element.clientWidth, element.clientHeight);
       vMat.resolution.set(element.clientWidth, element.clientHeight);
 
-      // 创建虚线材质
       const hMatDashed = hMat.clone();
       hMatDashed.dashed = true;
       hMatDashed.dashSize = 4;
@@ -110,21 +126,68 @@ class LinkedCrosshairsApp {
       vMatDashed.dashSize = 4;
       vMatDashed.gapSize = 4;
 
-      // 每条线由4个点（2个线段）构成
-      const horizontalSolid = new Line2(new LineGeometry(), hMat);
-      const verticalSolid = new Line2(new LineGeometry(), vMat);
-      const horizontalDashedLeft = new Line2(new LineGeometry(), hMatDashed);
-      const horizontalDashedRight = new Line2(new LineGeometry(), hMatDashed);
-      const verticalDashedTop = new Line2(new LineGeometry(), vMatDashed);
-      const verticalDashedBottom = new Line2(new LineGeometry(), vMatDashed);
+      // 热区线材质 (半透明、红色、更宽，用于调试)
+      const hitboxMaterial = new LineMaterial({
+        linewidth: HOT_ZONE_PADDING * 2,
+        transparent: true,
+        opacity: 0.5, // 暂时设为半透明以便观察
+        color: 0xff0000, // 暂时设为红色以便观察
+        dashed: false,
+      });
+      hitboxMaterial.resolution.set(element.clientWidth, element.clientHeight);
+
+      // --- 创建几何体与线对象 ---
+      // 为每条线创建一个 LineGeometry
+      const geometries = {
+        horizontalSolidLeft: new LineGeometry(),
+        horizontalSolidRight: new LineGeometry(),
+        verticalSolidTop: new LineGeometry(),
+        verticalSolidBottom: new LineGeometry(),
+        horizontalDashedLeft: new LineGeometry(),
+        horizontalDashedRight: new LineGeometry(),
+        verticalDashedTop: new LineGeometry(),
+        verticalDashedBottom: new LineGeometry(),
+      };
+
+      // 创建可见线
+      const horizontalSolidLeft = new Line2(geometries.horizontalSolidLeft, hMat);
+      const horizontalSolidRight = new Line2(geometries.horizontalSolidRight, hMat);
+      const verticalSolidTop = new Line2(geometries.verticalSolidTop, vMat);
+      const verticalSolidBottom = new Line2(geometries.verticalSolidBottom, vMat);
+      const horizontalDashedLeft = new Line2(geometries.horizontalDashedLeft, hMatDashed);
+      const horizontalDashedRight = new Line2(geometries.horizontalDashedRight, hMatDashed);
+      const verticalDashedTop = new Line2(geometries.verticalDashedTop, vMatDashed);
+      const verticalDashedBottom = new Line2(geometries.verticalDashedBottom, vMatDashed);
+
+      // 创建热区线 (共享几何体)
+      const horizontalSolidLeftHitbox = new Line2(geometries.horizontalSolidLeft, hitboxMaterial);
+      const horizontalSolidRightHitbox = new Line2(geometries.horizontalSolidRight, hitboxMaterial);
+      const verticalSolidTopHitbox = new Line2(geometries.verticalSolidTop, hitboxMaterial);
+      const verticalSolidBottomHitbox = new Line2(geometries.verticalSolidBottom, hitboxMaterial);
+      const horizontalDashedLeftHitbox = new Line2(geometries.horizontalDashedLeft, hitboxMaterial);
+      const horizontalDashedRightHitbox = new Line2(geometries.horizontalDashedRight, hitboxMaterial);
+      const verticalDashedTopHitbox = new Line2(geometries.verticalDashedTop, hitboxMaterial);
+      const verticalDashedBottomHitbox = new Line2(geometries.verticalDashedBottom, hitboxMaterial);
 
       uiScene.add(
-        horizontalSolid,
-        verticalSolid,
+        // 可见线
+        horizontalSolidLeft,
+        horizontalSolidRight,
+        verticalSolidTop,
+        verticalSolidBottom,
         horizontalDashedLeft,
         horizontalDashedRight,
         verticalDashedTop,
         verticalDashedBottom,
+        // 热区线
+        horizontalSolidLeftHitbox,
+        horizontalSolidRightHitbox,
+        verticalSolidTopHitbox,
+        verticalSolidBottomHitbox,
+        horizontalDashedLeftHitbox,
+        horizontalDashedRightHitbox,
+        verticalDashedTopHitbox,
+        verticalDashedBottomHitbox,
       );
 
       this.views.push({
@@ -135,12 +198,24 @@ class LinkedCrosshairsApp {
         camera,
         uiScene,
         uiCamera,
-        horizontalSolid,
-        verticalSolid,
+        // 可见线
+        horizontalSolidLeft,
+        horizontalSolidRight,
+        verticalSolidTop,
+        verticalSolidBottom,
         horizontalDashedLeft,
         horizontalDashedRight,
         verticalDashedTop,
         verticalDashedBottom,
+        // 热区线
+        horizontalSolidLeftHitbox,
+        horizontalSolidRightHitbox,
+        verticalSolidTopHitbox,
+        verticalSolidBottomHitbox,
+        horizontalDashedLeftHitbox,
+        horizontalDashedRightHitbox,
+        verticalDashedTopHitbox,
+        verticalDashedBottomHitbox,
       });
     }
   }
@@ -151,6 +226,12 @@ class LinkedCrosshairsApp {
     // 全局监听 mouseup，确保在任何地方松开都能停止拖拽
     window.addEventListener('mouseup', () => {
       this.isDragging = false;
+      // 鼠标抬起时，恢复grab相关的cursor状态
+      this.views.forEach(view => {
+        if (view.element.style.cursor === 'grabbing') {
+          view.element.style.cursor = 'grab';
+        }
+      });
     });
 
     this.views.forEach(view => {
@@ -158,23 +239,64 @@ class LinkedCrosshairsApp {
       view.element.addEventListener('mousedown', e => {
         this.isDragging = true;
         this.dragMode = this.getDragMode(e, view);
-        // 按下时也立即更新一次，实现点击定位
-        this.updateSharedPoint(e, view);
+        // console.log(this.dragMode);
+
+        // 记录拖拽起始点
+        this.lastMousePosition.set(e.clientX, e.clientY);
+
+        if (this.dragMode === 'rotate') {
+          const rect = view.element.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+
+          const centerPoint = this.getCenterPoint();
+          let xPixel: number, yPixel: number;
+
+          switch (view.name) {
+            case 'Axial':
+              xPixel = centerPoint.x * rect.width;
+              yPixel = centerPoint.y * rect.height;
+              break;
+            case 'Coronal':
+              xPixel = centerPoint.x * rect.width;
+              yPixel = centerPoint.z * rect.height;
+              break;
+            case 'Sagittal':
+              xPixel = centerPoint.y * rect.width;
+              yPixel = centerPoint.z * rect.height;
+              break;
+          }
+
+          // 修正：使用正确的 atan2 参数，基于像素坐标计算初始角度
+          this.startDragAngle = Math.atan2(mouseY - yPixel, mouseX - xPixel);
+          this.startRotation = this.rotationAngle;
+          view.element.style.cursor = 'grabbing';
+        }
+
+        // 只有在中心模式下，单击才会立即定位
+        if (this.dragMode === 'center') {
+          const rect = view.element.getBoundingClientRect();
+          const x = (e.clientX - rect.left) / rect.width;
+          const y = (e.clientY - rect.top) / rect.height;
+          this.updateCenter(x, y, view.name);
+          this.updateAllCrosshairs();
+        }
       });
 
       // 鼠标移动时，根据情况更新十字线或鼠标样式
       view.element.addEventListener('mousemove', e => {
         if (this.isDragging) {
-          this.updateSharedPoint(e, view);
+          this.updateDragState(e, view);
         } else {
           // 如果没在拖拽，就只更新鼠标样式
           const mode = this.getDragMode(e, view);
           switch (mode) {
             case 'horizontal':
-              view.element.style.cursor = 'ns-resize'; // 上下拖拽
-              break;
             case 'vertical':
-              view.element.style.cursor = 'ew-resize'; // 左右拖拽
+              view.element.style.cursor = 'pointer';
+              break;
+            case 'rotate':
+              view.element.style.cursor = 'grab'; // 旋转
               break;
             default:
               view.element.style.cursor = 'move'; // 移动
@@ -192,68 +314,129 @@ class LinkedCrosshairsApp {
   }
 
   // 根据鼠标位置，判断当前处于哪种拖拽模式
-  private getDragMode(e: MouseEvent, view: ViewConfig): 'center' | 'horizontal' | 'vertical' {
+  private getDragMode(e: MouseEvent, view: ViewConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' {
     const rect = view.element.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-    const centerPoint = this.getCenterPoint();
 
-    let xPixel: number, yPixel: number;
+    // 1. 将鼠标位置转换为标准化设备坐标 (NDC)
+    const mouseNDC = new THREE.Vector2();
+    mouseNDC.x = (mouseX / rect.width) * 2 - 1;
+    mouseNDC.y = -(mouseY / rect.height) * 2 + 1;
 
-    // 获取当前视图十字线的中心像素坐标
-    switch (view.name) {
-      case 'Axial':
-        xPixel = centerPoint.x * rect.width;
-        yPixel = centerPoint.y * rect.height;
-        break;
-      case 'Coronal':
-        xPixel = centerPoint.x * rect.width;
-        yPixel = centerPoint.z * rect.height;
-        break;
-      case 'Sagittal':
-        xPixel = centerPoint.y * rect.width;
-        yPixel = centerPoint.z * rect.height;
-        break;
-    }
+    // 2. 移除不再需要的 threshold 设置
+    // this.raycaster.params.Line.threshold = HOT_ZONE_PADDING;
 
-    const distToHorizontal = Math.abs(mouseY - yPixel);
-    const distToVertical = Math.abs(mouseX - xPixel);
+    // 3. 从 UI 相机发射射线
+    this.raycaster.setFromCamera(mouseNDC, view.uiCamera);
 
-    // 检查是否在水平虚线热区
-    // 条件：鼠标离水平线很近，且离垂直线有一定距离（在虚线范围内）
-    if (distToHorizontal <= HOT_ZONE_PADDING && distToVertical >= CENTER_GAP_PIXELS && distToVertical <= DASH_ZONE_PIXELS) {
-      return 'horizontal';
-    }
+    // 4. 获取所有需要检测的 *热区线*
+    const linesToCheck = [
+      view.horizontalSolidLeftHitbox,
+      view.horizontalSolidRightHitbox,
+      view.verticalSolidTopHitbox,
+      view.verticalSolidBottomHitbox,
+      view.horizontalDashedLeftHitbox,
+      view.horizontalDashedRightHitbox,
+      view.verticalDashedTopHitbox,
+      view.verticalDashedBottomHitbox,
+    ];
 
-    // 检查是否在垂直虚线热区
-    // 条件：鼠标离垂直线很近，且离水平线有一定距离（在虚线范围内）
-    if (distToVertical <= HOT_ZONE_PADDING && distToHorizontal >= CENTER_GAP_PIXELS && distToHorizontal <= DASH_ZONE_PIXELS) {
-      return 'vertical';
+    // 5. 执行相交检测
+    const intersects = this.raycaster.intersectObjects(linesToCheck);
+
+    if (intersects.length > 0) {
+      const intersectedObject = intersects[0].object;
+
+      // 6. 根据相交的 *热区线* 判断模式
+      switch (intersectedObject) {
+        case view.horizontalDashedLeftHitbox:
+        case view.horizontalDashedRightHitbox:
+          return 'horizontal';
+        case view.verticalDashedTopHitbox:
+        case view.verticalDashedBottomHitbox:
+          return 'vertical';
+        case view.horizontalSolidLeftHitbox:
+        case view.horizontalSolidRightHitbox:
+        case view.verticalSolidTopHitbox:
+        case view.verticalSolidBottomHitbox:
+          return 'rotate';
+      }
     }
 
     return 'center';
   }
 
-  // 根据在哪个视图中操作，来更新共享点
-  private updateSharedPoint(e: MouseEvent, activeView: ViewConfig) {
+  // 根据拖拽来更新状态
+  private updateDragState(e: MouseEvent, activeView: ViewConfig) {
     const rect = activeView.element.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    // 根据当前的拖拽模式来更新共享点
-    switch (this.dragMode) {
-      case 'horizontal':
-        this.updateHorizontal(y, activeView.name);
-        break;
-      case 'vertical':
-        this.updateVertical(x, activeView.name);
-        break;
-      case 'center':
-      default:
-        this.updateCenter(x, y, activeView.name);
-        break;
+    if (this.dragMode === 'rotate') {
+      const centerPoint = this.getCenterPoint();
+      let xPixel: number, yPixel: number;
+
+      switch (activeView.name) {
+        case 'Axial':
+          xPixel = centerPoint.x * rect.width;
+          yPixel = centerPoint.y * rect.height;
+          break;
+        case 'Coronal':
+          xPixel = centerPoint.x * rect.width;
+          yPixel = centerPoint.z * rect.height;
+          break;
+        case 'Sagittal':
+          xPixel = centerPoint.y * rect.width;
+          yPixel = centerPoint.z * rect.height;
+          break;
+      }
+
+      // 修正：使用正确的 atan2 参数，基于像素坐标计算当前角度
+      const currentAngle = Math.atan2(mouseY - yPixel, mouseX - xPixel);
+      this.rotationAngle = this.startRotation - (currentAngle - this.startDragAngle);
+    } else {
+      // --- 统一处理所有位移拖拽 ---
+      const deltaX = e.clientX - this.lastMousePosition.x; // 屏幕坐标，右为正
+      const deltaY = e.clientY - this.lastMousePosition.y; // 屏幕坐标，下为正
+
+      let dxPixels = 0;
+      let dyPixels = 0;
+
+      if (this.dragMode === 'center') {
+        // 中心拖拽，直接使用屏幕坐标系的增量
+        dxPixels = deltaX;
+        dyPixels = deltaY;
+      } else {
+        // 水平/垂直拖拽：将增量投影到“线的法向方向”上，使拖拽总是沿着线的法向移动
+        const angle = this.rotationAngle;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+
+        // 在像素坐标(y向下)下：
+        // - 水平线方向向量 dH = (cos, -sin)，其法向 nH = (sin, cos)
+        // - 垂直线方向向量 dV = (sin, cos)，其法向 nV = (cos, -sin)
+        let nx = 0;
+        let ny = 0;
+        if (this.dragMode === 'horizontal') {
+          nx = sin;
+          ny = cos;
+        } else if (this.dragMode === 'vertical') {
+          nx = cos;
+          ny = -sin;
+        }
+        // 投影到法向
+        const proj = deltaX * nx + deltaY * ny; // 标量
+        dxPixels = nx * proj;
+        dyPixels = ny * proj;
+      }
+
+      const normalizedDeltaX = dxPixels / rect.width;
+      const normalizedDeltaY = dyPixels / rect.height;
+      this.updateByDelta(normalizedDeltaX, normalizedDeltaY, activeView.name);
     }
 
+    this.lastMousePosition.set(e.clientX, e.clientY);
     this.updateAllCrosshairs();
   }
 
@@ -275,33 +458,22 @@ class LinkedCrosshairsApp {
     }
     this.mprMatrix.setPosition(centerPoint);
   }
-  private updateHorizontal(y: number, viewName: ViewConfig['name']) {
-    const centerPoint = this.getCenterPoint();
-    switch (viewName) {
-      case 'Axial': // 移动 Y
-        centerPoint.y = y;
-        break;
-      case 'Coronal': // 移动 Z
-        centerPoint.z = y;
-        break;
-      case 'Sagittal': // 移动 Z
-        centerPoint.z = y;
-        break;
-    }
-    this.mprMatrix.setPosition(centerPoint);
-  }
 
-  private updateVertical(x: number, viewName: ViewConfig['name']) {
+  // 新增：根据增量来更新中心点
+  private updateByDelta(normalizedDeltaX: number, normalizedDeltaY: number, viewName: ViewConfig['name']) {
     const centerPoint = this.getCenterPoint();
     switch (viewName) {
-      case 'Axial': // 移动 X
-        centerPoint.x = x;
+      case 'Axial': // XY 平面
+        centerPoint.x += normalizedDeltaX;
+        centerPoint.y += normalizedDeltaY;
         break;
-      case 'Coronal': // 移动 X
-        centerPoint.x = x;
+      case 'Coronal': // XZ 平面
+        centerPoint.x += normalizedDeltaX;
+        centerPoint.z += normalizedDeltaY;
         break;
-      case 'Sagittal': // 移动 Y
-        centerPoint.y = x;
+      case 'Sagittal': // YZ 平面
+        centerPoint.y += normalizedDeltaX;
+        centerPoint.z += normalizedDeltaY;
         break;
     }
     this.mprMatrix.setPosition(centerPoint);
@@ -310,6 +482,16 @@ class LinkedCrosshairsApp {
   // 使用共享点来更新所有三个视图的十字线
   private updateAllCrosshairs() {
     const centerPoint = this.getCenterPoint();
+
+    // 辅助函数：绕中心点旋转一个点
+    const rotatePoint = (px: number, py: number, cx: number, cy: number, angle: number): [number, number] => {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const npx = cx + (px - cx) * cos - (py - cy) * sin;
+      const npy = cy + (px - cx) * sin + (py - cy) * cos;
+      return [npx, npy];
+    };
+
     this.views.forEach(view => {
       const { clientWidth, clientHeight } = view.element;
       let xPixel: number, yPixel: number;
@@ -332,71 +514,92 @@ class LinkedCrosshairsApp {
 
       const correctedY = clientHeight - yPixel; // Y 轴翻转
 
+      // --- 核心改动：使用对角线长度确保线足够长 ---
+      const diagonal = Math.sqrt(clientWidth ** 2 + clientHeight ** 2);
+
+      // --- 定义未旋转时的线段端点 ---
+      // 水平线
+      const hLeft = xPixel - diagonal;
+      const hRight = xPixel + diagonal;
+      const hDashedLeftStart = xPixel - DASH_ZONE_PIXELS;
+      const hDashedLeftEnd = xPixel - CENTER_GAP_PIXELS;
+      const hDashedRightStart = xPixel + CENTER_GAP_PIXELS;
+      const hDashedRightEnd = xPixel + DASH_ZONE_PIXELS;
+
+      // 垂直线
+      const vTop = correctedY + diagonal;
+      const vBottom = correctedY - diagonal;
+      const vDashedTopStart = correctedY + DASH_ZONE_PIXELS;
+      const vDashedTopEnd = correctedY + CENTER_GAP_PIXELS;
+      const vDashedBottomStart = correctedY - CENTER_GAP_PIXELS;
+      const vDashedBottomEnd = correctedY - DASH_ZONE_PIXELS;
+
+      // --- 对所有端点应用旋转 ---
+      const p = (x: number, y: number) => rotatePoint(x, y, xPixel, correctedY, this.rotationAngle);
+
+      const [hSolidLeftStart_x, hSolidLeftStart_y] = p(hLeft, correctedY);
+      const [hSolidLeftEnd_x, hSolidLeftEnd_y] = p(hDashedLeftStart, correctedY);
+      const [hSolidRightStart_x, hSolidRightStart_y] = p(hDashedRightEnd, correctedY);
+      const [hSolidRightEnd_x, hSolidRightEnd_y] = p(hRight, correctedY);
+
+      const [hDashedLeftStart_x, hDashedLeftStart_y] = p(hDashedLeftStart, correctedY);
+      const [hDashedLeftEnd_x, hDashedLeftEnd_y] = p(hDashedLeftEnd, correctedY);
+      const [hDashedRightStart_x, hDashedRightStart_y] = p(hDashedRightStart, correctedY);
+      const [hDashedRightEnd_x, hDashedRightEnd_y] = p(hDashedRightEnd, correctedY);
+
+      const [vSolidTopStart_x, vSolidTopStart_y] = p(xPixel, vTop);
+      const [vSolidTopEnd_x, vSolidTopEnd_y] = p(xPixel, vDashedTopStart);
+      const [vSolidBottomStart_x, vSolidBottomStart_y] = p(xPixel, vDashedBottomEnd);
+      const [vSolidBottomEnd_x, vSolidBottomEnd_y] = p(xPixel, vBottom);
+
+      const [vDashedTopStart_x, vDashedTopStart_y] = p(xPixel, vDashedTopStart);
+      const [vDashedTopEnd_x, vDashedTopEnd_y] = p(xPixel, vDashedTopEnd);
+      const [vDashedBottomStart_x, vDashedBottomStart_y] = p(xPixel, vDashedBottomStart);
+      const [vDashedBottomEnd_x, vDashedBottomEnd_y] = p(xPixel, vDashedBottomEnd);
+
       // --- 更新水平线 ---
-      const hSolidGeom = view.horizontalSolid.geometry as LineGeometry;
+      const hSolidLeftGeom = view.horizontalSolidLeft.geometry as LineGeometry;
+      const hSolidRightGeom = view.horizontalSolidRight.geometry as LineGeometry;
       const hDashedLeftGeom = view.horizontalDashedLeft.geometry as LineGeometry;
       const hDashedRightGeom = view.horizontalDashedRight.geometry as LineGeometry;
 
-      // 左侧实线 + 右侧实线
-      hSolidGeom.setPositions([
-        0,
-        correctedY,
-        0,
-        xPixel - DASH_ZONE_PIXELS,
-        correctedY,
-        0, // 第一个线段
-        NaN,
-        NaN,
-        NaN, // 断点
-        xPixel + DASH_ZONE_PIXELS,
-        correctedY,
-        0,
-        clientWidth,
-        correctedY,
-        0, // 第二个线段
-      ]);
+      // 左侧实线
+      hSolidLeftGeom.setPositions([hSolidLeftStart_x, hSolidLeftStart_y, 0, hSolidLeftEnd_x, hSolidLeftEnd_y, 0]);
+
+      // 右侧实线
+      hSolidRightGeom.setPositions([hSolidRightStart_x, hSolidRightStart_y, 0, hSolidRightEnd_x, hSolidRightEnd_y, 0]);
 
       // 左侧虚线
-      hDashedLeftGeom.setPositions([xPixel - DASH_ZONE_PIXELS, correctedY, 0, xPixel - CENTER_GAP_PIXELS, correctedY, 0]);
+      hDashedLeftGeom.setPositions([hDashedLeftStart_x, hDashedLeftStart_y, 0, hDashedLeftEnd_x, hDashedLeftEnd_y, 0]);
 
       // 右侧虚线
-      hDashedRightGeom.setPositions([xPixel + CENTER_GAP_PIXELS, correctedY, 0, xPixel + DASH_ZONE_PIXELS, correctedY, 0]);
+      hDashedRightGeom.setPositions([hDashedRightStart_x, hDashedRightStart_y, 0, hDashedRightEnd_x, hDashedRightEnd_y, 0]);
 
-      view.horizontalSolid.computeLineDistances();
+      view.horizontalSolidLeft.computeLineDistances();
+      view.horizontalSolidRight.computeLineDistances();
       view.horizontalDashedLeft.computeLineDistances();
       view.horizontalDashedRight.computeLineDistances();
 
       // --- 更新垂直线 ---
-      const vSolidGeom = view.verticalSolid.geometry as LineGeometry;
+      const vSolidTopGeom = view.verticalSolidTop.geometry as LineGeometry;
+      const vSolidBottomGeom = view.verticalSolidBottom.geometry as LineGeometry;
       const vDashedTopGeom = view.verticalDashedTop.geometry as LineGeometry;
       const vDashedBottomGeom = view.verticalDashedBottom.geometry as LineGeometry;
 
-      // 顶部实线 + 底部实线
-      vSolidGeom.setPositions([
-        xPixel,
-        clientHeight,
-        0,
-        xPixel,
-        correctedY + DASH_ZONE_PIXELS,
-        0, // 第一个线段
-        NaN,
-        NaN,
-        NaN, // 断点
-        xPixel,
-        correctedY - DASH_ZONE_PIXELS,
-        0,
-        xPixel,
-        0,
-        0, // 第二个线段
-      ]);
+      // 顶部实线
+      vSolidTopGeom.setPositions([vSolidTopStart_x, vSolidTopStart_y, 0, vSolidTopEnd_x, vSolidTopEnd_y, 0]);
+
+      // 底部实线
+      vSolidBottomGeom.setPositions([vSolidBottomStart_x, vSolidBottomStart_y, 0, vSolidBottomEnd_x, vSolidBottomEnd_y, 0]);
 
       // 顶部虚线
-      vDashedTopGeom.setPositions([xPixel, correctedY + DASH_ZONE_PIXELS, 0, xPixel, correctedY + CENTER_GAP_PIXELS, 0]);
+      vDashedTopGeom.setPositions([vDashedTopStart_x, vDashedTopStart_y, 0, vDashedTopEnd_x, vDashedTopEnd_y, 0]);
 
       // 底部虚线
-      vDashedBottomGeom.setPositions([xPixel, correctedY - CENTER_GAP_PIXELS, 0, xPixel, correctedY - DASH_ZONE_PIXELS, 0]);
+      vDashedBottomGeom.setPositions([vDashedBottomStart_x, vDashedBottomStart_y, 0, vDashedBottomEnd_x, vDashedBottomEnd_y, 0]);
 
-      view.verticalSolid.computeLineDistances();
+      view.verticalSolidTop.computeLineDistances();
+      view.verticalSolidBottom.computeLineDistances();
       view.verticalDashedTop.computeLineDistances();
       view.verticalDashedBottom.computeLineDistances();
     });
@@ -408,12 +611,23 @@ class LinkedCrosshairsApp {
         element,
         renderer,
         uiCamera,
-        horizontalSolid,
-        verticalSolid,
+        horizontalSolidLeft,
+        horizontalSolidRight,
+        verticalSolidTop,
+        verticalSolidBottom,
         horizontalDashedLeft,
         horizontalDashedRight,
         verticalDashedTop,
         verticalDashedBottom,
+        // 热区线也需要更新材质
+        horizontalSolidLeftHitbox,
+        horizontalSolidRightHitbox,
+        verticalSolidTopHitbox,
+        verticalSolidBottomHitbox,
+        horizontalDashedLeftHitbox,
+        horizontalDashedRightHitbox,
+        verticalDashedTopHitbox,
+        verticalDashedBottomHitbox,
       } = view;
       const { clientWidth, clientHeight } = element;
 
@@ -426,12 +640,23 @@ class LinkedCrosshairsApp {
 
       // 更新 LineMaterial 的 resolution
       const resolution = new THREE.Vector2(clientWidth, clientHeight);
-      (horizontalSolid.material as LineMaterial).resolution = resolution;
-      (verticalSolid.material as LineMaterial).resolution = resolution;
+      (horizontalSolidLeft.material as LineMaterial).resolution = resolution;
+      (horizontalSolidRight.material as LineMaterial).resolution = resolution;
+      (verticalSolidTop.material as LineMaterial).resolution = resolution;
+      (verticalSolidBottom.material as LineMaterial).resolution = resolution;
       (horizontalDashedLeft.material as LineMaterial).resolution = resolution;
       (horizontalDashedRight.material as LineMaterial).resolution = resolution;
       (verticalDashedTop.material as LineMaterial).resolution = resolution;
       (verticalDashedBottom.material as LineMaterial).resolution = resolution;
+      // 热区线的材质也需要更新 resolution
+      (horizontalSolidLeftHitbox.material as LineMaterial).resolution = resolution;
+      (horizontalSolidRightHitbox.material as LineMaterial).resolution = resolution;
+      (verticalSolidTopHitbox.material as LineMaterial).resolution = resolution;
+      (verticalSolidBottomHitbox.material as LineMaterial).resolution = resolution;
+      (horizontalDashedLeftHitbox.material as LineMaterial).resolution = resolution;
+      (horizontalDashedRightHitbox.material as LineMaterial).resolution = resolution;
+      (verticalDashedTopHitbox.material as LineMaterial).resolution = resolution;
+      (verticalDashedBottomHitbox.material as LineMaterial).resolution = resolution;
     });
     this.updateAllCrosshairs();
   }
