@@ -1,9 +1,13 @@
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 
 // --- 配置常量 ---
 const CENTER_GAP_PIXELS = 32; // 中心空隙大小 (单边)
 const DASH_ZONE_PIXELS = 128; // 从中心点到虚线末端的距离
 const HOT_ZONE_PADDING = 4; // 虚线抓手的像素范围 (单边)
+const LINE_WIDTH = 2;
 
 // 定义每个视图的配置信息
 type ViewConfig = {
@@ -14,10 +18,12 @@ type ViewConfig = {
   camera: THREE.OrthographicCamera;
   uiScene: THREE.Scene;
   uiCamera: THREE.OrthographicCamera;
-  horizontalSolid: THREE.LineSegments;
-  horizontalDashed: THREE.LineSegments;
-  verticalSolid: THREE.LineSegments;
-  verticalDashed: THREE.LineSegments;
+  horizontalSolid: Line2;
+  verticalSolid: Line2;
+  horizontalDashedLeft: Line2;
+  horizontalDashedRight: Line2;
+  verticalDashedTop: Line2;
+  verticalDashedBottom: Line2;
 };
 
 class LinkedCrosshairsApp {
@@ -49,9 +55,9 @@ class LinkedCrosshairsApp {
     ];
 
     const colors = {
-      Axial: new THREE.Color(0x00ff00), // 绿色
-      Coronal: new THREE.Color(0x0000ff), // 蓝色
-      Sagittal: new THREE.Color(0xffff00), // 黄色
+      Axial: new THREE.Color(0x3f87f5), // 蓝色
+      Coronal: new THREE.Color(0x26d070), // 绿色
+      Sagittal: new THREE.Color(0xf7a927), // 黄色
     };
 
     for (const config of viewConfigs) {
@@ -72,50 +78,54 @@ class LinkedCrosshairsApp {
       const uiCamera = new THREE.OrthographicCamera(0, element.clientWidth, element.clientHeight, 0, 0.1, 10);
       uiCamera.position.z = 1;
 
-      let hMatSolid: THREE.LineBasicMaterial,
-        vMatSolid: THREE.LineBasicMaterial,
-        hMatDashed: THREE.LineDashedMaterial,
-        vMatDashed: THREE.LineDashedMaterial;
+      let hMat: LineMaterial, vMat: LineMaterial;
 
       switch (config.name) {
         case 'Axial':
-          hMatSolid = new THREE.LineBasicMaterial({ color: colors.Coronal });
-          vMatSolid = new THREE.LineBasicMaterial({ color: colors.Sagittal });
-          hMatDashed = new THREE.LineDashedMaterial({ color: colors.Coronal, dashSize: 4, gapSize: 4 });
-          vMatDashed = new THREE.LineDashedMaterial({ color: colors.Sagittal, dashSize: 4, gapSize: 4 });
+          hMat = new LineMaterial({ color: colors.Coronal, linewidth: LINE_WIDTH, dashed: false });
+          vMat = new LineMaterial({ color: colors.Sagittal, linewidth: LINE_WIDTH, dashed: false });
           break;
         case 'Coronal':
-          hMatSolid = new THREE.LineBasicMaterial({ color: colors.Axial });
-          vMatSolid = new THREE.LineBasicMaterial({ color: colors.Sagittal });
-          hMatDashed = new THREE.LineDashedMaterial({ color: colors.Axial, dashSize: 4, gapSize: 4 });
-          vMatDashed = new THREE.LineDashedMaterial({ color: colors.Sagittal, dashSize: 4, gapSize: 4 });
+          hMat = new LineMaterial({ color: colors.Axial, linewidth: LINE_WIDTH, dashed: false });
+          vMat = new LineMaterial({ color: colors.Sagittal, linewidth: LINE_WIDTH, dashed: false });
           break;
         case 'Sagittal':
-          hMatSolid = new THREE.LineBasicMaterial({ color: colors.Axial });
-          vMatSolid = new THREE.LineBasicMaterial({ color: colors.Coronal });
-          hMatDashed = new THREE.LineDashedMaterial({ color: colors.Axial, dashSize: 4, gapSize: 4 });
-          vMatDashed = new THREE.LineDashedMaterial({ color: colors.Coronal, dashSize: 4, gapSize: 4 });
+          hMat = new LineMaterial({ color: colors.Axial, linewidth: LINE_WIDTH, dashed: false });
+          vMat = new LineMaterial({ color: colors.Coronal, linewidth: LINE_WIDTH, dashed: false });
           break;
       }
 
+      // 设置材质的分辨率
+      hMat.resolution.set(element.clientWidth, element.clientHeight);
+      vMat.resolution.set(element.clientWidth, element.clientHeight);
+
+      // 创建虚线材质
+      const hMatDashed = hMat.clone();
+      hMatDashed.dashed = true;
+      hMatDashed.dashSize = 4;
+      hMatDashed.gapSize = 4;
+
+      const vMatDashed = vMat.clone();
+      vMatDashed.dashed = true;
+      vMatDashed.dashSize = 4;
+      vMatDashed.gapSize = 4;
+
       // 每条线由4个点（2个线段）构成
-      const hSolidGeom = new THREE.BufferGeometry();
-      hSolidGeom.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(4 * 3), 3));
-      const horizontalSolid = new THREE.LineSegments(hSolidGeom, hMatSolid);
+      const horizontalSolid = new Line2(new LineGeometry(), hMat);
+      const verticalSolid = new Line2(new LineGeometry(), vMat);
+      const horizontalDashedLeft = new Line2(new LineGeometry(), hMatDashed);
+      const horizontalDashedRight = new Line2(new LineGeometry(), hMatDashed);
+      const verticalDashedTop = new Line2(new LineGeometry(), vMatDashed);
+      const verticalDashedBottom = new Line2(new LineGeometry(), vMatDashed);
 
-      const hDashedGeom = new THREE.BufferGeometry();
-      hDashedGeom.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(4 * 3), 3));
-      const horizontalDashed = new THREE.LineSegments(hDashedGeom, hMatDashed);
-
-      const vSolidGeom = new THREE.BufferGeometry();
-      vSolidGeom.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(4 * 3), 3));
-      const verticalSolid = new THREE.LineSegments(vSolidGeom, vMatSolid);
-
-      const vDashedGeom = new THREE.BufferGeometry();
-      vDashedGeom.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(4 * 3), 3));
-      const verticalDashed = new THREE.LineSegments(vDashedGeom, vMatDashed);
-
-      uiScene.add(horizontalSolid, horizontalDashed, verticalSolid, verticalDashed);
+      uiScene.add(
+        horizontalSolid,
+        verticalSolid,
+        horizontalDashedLeft,
+        horizontalDashedRight,
+        verticalDashedTop,
+        verticalDashedBottom,
+      );
 
       this.views.push({
         element,
@@ -126,9 +136,11 @@ class LinkedCrosshairsApp {
         uiScene,
         uiCamera,
         horizontalSolid,
-        horizontalDashed,
         verticalSolid,
-        verticalDashed,
+        horizontalDashedLeft,
+        horizontalDashedRight,
+        verticalDashedTop,
+        verticalDashedBottom,
       });
     }
   }
@@ -321,56 +333,88 @@ class LinkedCrosshairsApp {
       const correctedY = clientHeight - yPixel; // Y 轴翻转
 
       // --- 更新水平线 ---
-      const hSolidPos = view.horizontalSolid.geometry.attributes.position as THREE.BufferAttribute;
-      const hDashedPos = view.horizontalDashed.geometry.attributes.position as THREE.BufferAttribute;
+      const hSolidGeom = view.horizontalSolid.geometry as LineGeometry;
+      const hDashedLeftGeom = view.horizontalDashedLeft.geometry as LineGeometry;
+      const hDashedRightGeom = view.horizontalDashedRight.geometry as LineGeometry;
 
-      // 左侧实线
-      hSolidPos.setXYZ(0, 0, correctedY, 0);
-      hSolidPos.setXYZ(1, xPixel - DASH_ZONE_PIXELS, correctedY, 0);
-      // 右侧实线
-      hSolidPos.setXYZ(2, xPixel + DASH_ZONE_PIXELS, correctedY, 0);
-      hSolidPos.setXYZ(3, clientWidth, correctedY, 0);
+      // 左侧实线 + 右侧实线
+      hSolidGeom.setPositions([
+        0,
+        correctedY,
+        0,
+        xPixel - DASH_ZONE_PIXELS,
+        correctedY,
+        0, // 第一个线段
+        NaN,
+        NaN,
+        NaN, // 断点
+        xPixel + DASH_ZONE_PIXELS,
+        correctedY,
+        0,
+        clientWidth,
+        correctedY,
+        0, // 第二个线段
+      ]);
 
       // 左侧虚线
-      hDashedPos.setXYZ(0, xPixel - DASH_ZONE_PIXELS, correctedY, 0);
-      hDashedPos.setXYZ(1, xPixel - CENTER_GAP_PIXELS, correctedY, 0);
-      // 右侧虚线
-      hDashedPos.setXYZ(2, xPixel + CENTER_GAP_PIXELS, correctedY, 0);
-      hDashedPos.setXYZ(3, xPixel + DASH_ZONE_PIXELS, correctedY, 0);
+      hDashedLeftGeom.setPositions([xPixel - DASH_ZONE_PIXELS, correctedY, 0, xPixel - CENTER_GAP_PIXELS, correctedY, 0]);
 
-      view.horizontalSolid.geometry.computeBoundingSphere();
-      view.horizontalDashed.computeLineDistances(); // 虚线需要计算
-      hSolidPos.needsUpdate = true;
-      hDashedPos.needsUpdate = true;
+      // 右侧虚线
+      hDashedRightGeom.setPositions([xPixel + CENTER_GAP_PIXELS, correctedY, 0, xPixel + DASH_ZONE_PIXELS, correctedY, 0]);
+
+      view.horizontalSolid.computeLineDistances();
+      view.horizontalDashedLeft.computeLineDistances();
+      view.horizontalDashedRight.computeLineDistances();
 
       // --- 更新垂直线 ---
-      const vSolidPos = view.verticalSolid.geometry.attributes.position as THREE.BufferAttribute;
-      const vDashedPos = view.verticalDashed.geometry.attributes.position as THREE.BufferAttribute;
+      const vSolidGeom = view.verticalSolid.geometry as LineGeometry;
+      const vDashedTopGeom = view.verticalDashedTop.geometry as LineGeometry;
+      const vDashedBottomGeom = view.verticalDashedBottom.geometry as LineGeometry;
 
-      // 顶部实线
-      vSolidPos.setXYZ(0, xPixel, clientHeight, 0);
-      vSolidPos.setXYZ(1, xPixel, correctedY + DASH_ZONE_PIXELS, 0);
-      // 底部实线
-      vSolidPos.setXYZ(2, xPixel, correctedY - DASH_ZONE_PIXELS, 0);
-      vSolidPos.setXYZ(3, xPixel, 0, 0);
+      // 顶部实线 + 底部实线
+      vSolidGeom.setPositions([
+        xPixel,
+        clientHeight,
+        0,
+        xPixel,
+        correctedY + DASH_ZONE_PIXELS,
+        0, // 第一个线段
+        NaN,
+        NaN,
+        NaN, // 断点
+        xPixel,
+        correctedY - DASH_ZONE_PIXELS,
+        0,
+        xPixel,
+        0,
+        0, // 第二个线段
+      ]);
 
       // 顶部虚线
-      vDashedPos.setXYZ(0, xPixel, correctedY + DASH_ZONE_PIXELS, 0);
-      vDashedPos.setXYZ(1, xPixel, correctedY + CENTER_GAP_PIXELS, 0);
-      // 底部虚线
-      vDashedPos.setXYZ(2, xPixel, correctedY - CENTER_GAP_PIXELS, 0);
-      vDashedPos.setXYZ(3, xPixel, correctedY - DASH_ZONE_PIXELS, 0);
+      vDashedTopGeom.setPositions([xPixel, correctedY + DASH_ZONE_PIXELS, 0, xPixel, correctedY + CENTER_GAP_PIXELS, 0]);
 
-      view.verticalSolid.geometry.computeBoundingSphere();
-      view.verticalDashed.computeLineDistances(); // 虚线需要计算
-      vSolidPos.needsUpdate = true;
-      vDashedPos.needsUpdate = true;
+      // 底部虚线
+      vDashedBottomGeom.setPositions([xPixel, correctedY - CENTER_GAP_PIXELS, 0, xPixel, correctedY - DASH_ZONE_PIXELS, 0]);
+
+      view.verticalSolid.computeLineDistances();
+      view.verticalDashedTop.computeLineDistances();
+      view.verticalDashedBottom.computeLineDistances();
     });
   }
 
   private handleResize() {
     this.views.forEach(view => {
-      const { element, renderer, uiCamera } = view;
+      const {
+        element,
+        renderer,
+        uiCamera,
+        horizontalSolid,
+        verticalSolid,
+        horizontalDashedLeft,
+        horizontalDashedRight,
+        verticalDashedTop,
+        verticalDashedBottom,
+      } = view;
       const { clientWidth, clientHeight } = element;
 
       renderer.setSize(clientWidth, clientHeight);
@@ -379,6 +423,15 @@ class LinkedCrosshairsApp {
       uiCamera.top = clientHeight;
       uiCamera.bottom = 0;
       uiCamera.updateProjectionMatrix();
+
+      // 更新 LineMaterial 的 resolution
+      const resolution = new THREE.Vector2(clientWidth, clientHeight);
+      (horizontalSolid.material as LineMaterial).resolution = resolution;
+      (verticalSolid.material as LineMaterial).resolution = resolution;
+      (horizontalDashedLeft.material as LineMaterial).resolution = resolution;
+      (horizontalDashedRight.material as LineMaterial).resolution = resolution;
+      (verticalDashedTop.material as LineMaterial).resolution = resolution;
+      (verticalDashedBottom.material as LineMaterial).resolution = resolution;
     });
     this.updateAllCrosshairs();
   }

@@ -2,15 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>步骤 4.5.0 (准备): 三视图正交MPR</title>
+    <title>步骤 4.5.1: 三视图十字线联动 UI 实现</title>
     <style>
       body {
         margin: 0;
         overflow: hidden;
-        background-color: #1a1a1a;
-        color: #fff;
-        font-family: sans-serif;
+        background-color: #333; /* 背景色，用于区分视图间隙 */
       }
       #mpr-container {
         display: grid;
@@ -18,15 +15,15 @@
         grid-template-rows: 1fr 1fr;
         width: 100vw;
         height: 100vh;
-        gap: 2px;
-        background-color: #333;
+        gap: 4px; /* 视图之间的间隙 */
       }
       .view {
         position: relative;
         background-color: #000;
-        overflow: hidden; /* 确保 canvas 不会溢出 */
+        min-width: 0;
+        min-height: 0;
       }
-      /* 让轴位视图占据左侧所有行 */
+      /* 轴位视图占据左侧所有行 */
       #axial-view {
         grid-column: 1 / 2;
         grid-row: 1 / 3;
@@ -43,19 +40,34 @@
       }
       .view-label {
         position: absolute;
-        top: 10px;
-        left: 10px;
+        top: 0px;
+        left: 0px;
         color: #fff;
         background-color: rgba(0, 0, 0, 0.5);
-        padding: 4px 8px;
+        padding: 0px 4px;
         border-radius: 4px;
         font-size: 14px;
         pointer-events: none; /* 标签不干扰鼠标事件 */
       }
-      canvas {
+      .color-label {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
         position: absolute;
-        top: 0;
-        left: 0;
+        right: 0px;
+        top: 0px;
+      }
+      .color-label.axial {
+        background-color: #3f87f5;
+      }
+      .color-label.coronal {
+        background-color: #26d070;
+      }
+      .color-label.sagittal {
+        background-color: #f7a927;
+      }
+      canvas {
+        display: block;
         width: 100%;
         height: 100%;
       }
@@ -64,15 +76,17 @@
   <body>
     <div id="mpr-container">
       <div id="axial-view" class="view">
-        <div class="view-label">轴位 (Axial)</div>
-      </div>
-      <div id="sagittal-view" class="view">
-        <div class="view-label">矢状位 (Sagittal)</div>
+        <div class="view-label">轴状位 (Axial)</div>
+        <div class="color-label axial"></div>
       </div>
       <div id="coronal-view" class="view">
         <div class="view-label">冠状位 (Coronal)</div>
+        <div class="color-label coronal"></div>
+      </div>
+      <div id="sagittal-view" class="view">
+        <div class="view-label">矢状位 (Sagittal)</div>
+        <div class="color-label sagittal"></div>
       </div>
     </div>
-    <!-- Three.js 和其他库将由工程化配置自动注入 -->
   </body>
 </html>
