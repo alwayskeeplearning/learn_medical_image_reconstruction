@@ -23,7 +23,7 @@ import {
 import { vertexShader } from './vertexShader';
 import { fragmentShader } from './fragmentShader';
 import { calculateMatrix, calculateSliceInfoForDirection } from './helper';
-
+// window.calculateSliceInfoForDirection = calculateSliceInfoForDirection;
 type TViewConfig = {
   name: 'Axial' | 'Sagittal' | 'Coronal';
   element: HTMLElement;
@@ -43,7 +43,6 @@ type TSizeInfo = {
 };
 
 class MPRViewer {
-  private container: HTMLElement;
   private axialElement: HTMLElement;
   private coronalElement: HTMLElement;
   private sagittalElement: HTMLElement;
@@ -55,12 +54,11 @@ class MPRViewer {
   private sagittalSliceInfo!: TSizeInfo;
   private centerPatient: Vector3;
   private metaData: any;
-  constructor(container: HTMLElement, axialElement: HTMLElement, coronalElement: HTMLElement, sagittalElement: HTMLElement) {
+  constructor(axialElement: HTMLElement, coronalElement: HTMLElement, sagittalElement: HTMLElement) {
     this.viewConfigs = [];
     this.voxelToPatientMatrix = new Matrix4();
     this.patientToVoxelMatrix = new Matrix4();
     this.centerPatient = new Vector3();
-    this.container = container;
     this.axialElement = axialElement;
     this.coronalElement = coronalElement;
     this.sagittalElement = sagittalElement;
@@ -81,6 +79,7 @@ class MPRViewer {
     const axialScene = new Scene();
     axialScene.add(axialPlane);
     const axialRenderer = new WebGLRenderer({ antialias: true });
+    axialRenderer.setPixelRatio(window.devicePixelRatio);
     axialRenderer.setSize(this.axialElement.clientWidth, this.axialElement.clientHeight);
     this.axialElement.appendChild(axialRenderer.domElement);
     const axialConfig: TViewConfig = {
@@ -105,6 +104,7 @@ class MPRViewer {
     const coronalScene = new Scene();
     coronalScene.add(coronalPlane);
     const coronalRenderer = new WebGLRenderer({ antialias: true });
+    coronalRenderer.setPixelRatio(window.devicePixelRatio);
     coronalRenderer.setSize(this.coronalElement.clientWidth, this.coronalElement.clientHeight);
     this.coronalElement.appendChild(coronalRenderer.domElement);
     const coronalConfig: TViewConfig = {
@@ -128,6 +128,7 @@ class MPRViewer {
     const sagittalScene = new Scene();
     sagittalScene.add(sagittalPlane);
     const sagittalRenderer = new WebGLRenderer({ antialias: true });
+    sagittalRenderer.setPixelRatio(window.devicePixelRatio);
     sagittalRenderer.setSize(this.sagittalElement.clientWidth, this.sagittalElement.clientHeight);
     this.sagittalElement.appendChild(sagittalRenderer.domElement);
     const sagittalConfig: TViewConfig = {
@@ -148,6 +149,40 @@ class MPRViewer {
       const { renderer, scene, camera } = view;
       renderer.render(scene, camera);
     });
+  }
+  rotateView(orientation: 'Axial' | 'Sagittal' | 'Coronal', axis: 'x' | 'y', angle: number) {
+    // 1. 找到对应的视图配置
+    const view = this.viewConfigs.find(v => v.name === orientation);
+    if (!view) {
+      console.error('未找到指定方向的视图');
+      return;
+    }
+
+    const material = view.mesh.material as TShaderMaterial;
+    const { uXAxis, uYAxis } = material.uniforms;
+
+    // 2. 确定旋转轴
+    // 我们需要复制一份原始向量作为旋转轴，避免在计算过程中被修改
+    const rotationAxis = new Vector3();
+    if (axis === 'x') {
+      rotationAxis.copy(uXAxis.value);
+    } else {
+      rotationAxis.copy(uYAxis.value);
+    }
+
+    // 3. 创建旋转矩阵
+    const rotationMatrix = new Matrix4();
+    rotationMatrix.makeRotationAxis(rotationAxis.normalize(), angle);
+
+    // 4. 应用旋转到 uXAxis, uYAxis 和 normal
+    uXAxis.value.applyMatrix4(rotationMatrix);
+    uYAxis.value.applyMatrix4(rotationMatrix);
+    view.normal.applyMatrix4(rotationMatrix);
+
+    // 理论上，旋转后向量长度不变，但为防止浮点数精度问题，最好进行归一化
+    uXAxis.value.normalize();
+    uYAxis.value.normalize();
+    view.normal.normalize();
   }
   handleResize() {
     // 更新每个视图的相机
@@ -183,7 +218,25 @@ class MPRViewer {
   attachEvent() {
     window.addEventListener('resize', this.handleResize.bind(this));
   }
-
+  calculateSliceInfoForDirection(index: number) {
+    const {
+      pixelSpacing: [xSpacing, ySpacing],
+      spacingBetweenSlices: zSpacing,
+      width,
+      height,
+      depth,
+    } = this.metaData;
+    return calculateSliceInfoForDirection(
+      (this.viewConfigs[index].mesh.material as TShaderMaterial).uniforms.uXAxis.value,
+      (this.viewConfigs[index].mesh.material as TShaderMaterial).uniforms.uYAxis.value,
+      width,
+      height,
+      depth,
+      [xSpacing, ySpacing],
+      zSpacing,
+      this.voxelToPatientMatrix,
+    );
+  }
   init(texture: TData3DTexture, metaData: any) {
     this.metaData = metaData;
     const {
@@ -233,36 +286,9 @@ class MPRViewer {
     });
     this.initViewConfig(material, physicalSize);
     this.handleResize();
-    this.axialSliceInfo = calculateSliceInfoForDirection(
-      (this.viewConfigs[0].mesh.material as TShaderMaterial).uniforms.uXAxis.value,
-      (this.viewConfigs[0].mesh.material as TShaderMaterial).uniforms.uYAxis.value,
-      width,
-      height,
-      depth,
-      [xSpacing, ySpacing],
-      zSpacing,
-      this.voxelToPatientMatrix,
-    );
-    this.coronalSliceInfo = calculateSliceInfoForDirection(
-      (this.viewConfigs[1].mesh.material as TShaderMaterial).uniforms.uXAxis.value,
-      (this.viewConfigs[1].mesh.material as TShaderMaterial).uniforms.uYAxis.value,
-      width,
-      height,
-      depth,
-      [xSpacing, ySpacing],
-      zSpacing,
-      this.voxelToPatientMatrix,
-    );
-    this.sagittalSliceInfo = calculateSliceInfoForDirection(
-      (this.viewConfigs[2].mesh.material as TShaderMaterial).uniforms.uXAxis.value,
-      (this.viewConfigs[2].mesh.material as TShaderMaterial).uniforms.uYAxis.value,
-      width,
-      height,
-      depth,
-      [xSpacing, ySpacing],
-      zSpacing,
-      this.voxelToPatientMatrix,
-    );
+    this.axialSliceInfo = this.calculateSliceInfoForDirection(0);
+    this.coronalSliceInfo = this.calculateSliceInfoForDirection(1);
+    this.sagittalSliceInfo = this.calculateSliceInfoForDirection(2);
     return {
       axialCount: this.axialSliceInfo.count,
       coronalCount: this.coronalSliceInfo.count,
@@ -289,17 +315,17 @@ class MPRViewer {
     if (orientation === 'sagittal') {
       count = this.sagittalSliceInfo.count;
       samplingInterval = this.sagittalSliceInfo.samplingInterval;
-      normal.copy(new Vector3(1, 0, 0));
+      normal.copy(this.viewConfigs[2].normal);
       material = this.viewConfigs[2].mesh.material as TShaderMaterial;
     } else if (orientation === 'coronal') {
       count = this.coronalSliceInfo.count;
       samplingInterval = this.coronalSliceInfo.samplingInterval;
-      normal.copy(new Vector3(0, 1, 0));
+      normal.copy(this.viewConfigs[1].normal);
       material = this.viewConfigs[1].mesh.material as TShaderMaterial;
     } else {
       count = this.axialSliceInfo.count;
       samplingInterval = this.axialSliceInfo.samplingInterval;
-      normal.copy(new Vector3(0, 0, 1));
+      normal.copy(this.viewConfigs[0].normal);
       material = this.viewConfigs[0].mesh.material as TShaderMaterial;
     }
     const i = index - 1 - (count - 1) / 2;
