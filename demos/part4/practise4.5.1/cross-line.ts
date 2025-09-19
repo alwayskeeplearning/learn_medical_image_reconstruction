@@ -1,12 +1,3 @@
-import type {
-  WebGLRenderer as TWebGLRenderer,
-  Scene as TScene,
-  OrthographicCamera as TOrthographicCamera,
-  Matrix4 as TMatrix4,
-  Raycaster as TRaycaster,
-  Vector3 as TVector3,
-  Mesh as TMesh,
-} from 'three';
 import {
   WebGLRenderer,
   Scene,
@@ -18,6 +9,7 @@ import {
   Mesh,
   PlaneGeometry,
   MeshBasicMaterial,
+  Euler, // ++ 导入 Euler
 } from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry';
@@ -26,10 +18,10 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 type TCrossConfig = {
   name: 'Axial' | 'Sagittal' | 'Coronal';
   element: HTMLElement;
-  matrix: TMatrix4;
-  renderer: TWebGLRenderer;
-  scene: TScene;
-  camera: TOrthographicCamera;
+  matrix: Matrix4;
+  renderer: WebGLRenderer;
+  scene: Scene;
+  camera: OrthographicCamera;
   horizontalSolidLeft: Line2;
   horizontalSolidRight: Line2;
   verticalSolidTop: Line2;
@@ -46,7 +38,7 @@ type TCrossConfig = {
   horizontalDashedRightHitbox: Line2;
   verticalDashedTopHitbox: Line2;
   verticalDashedBottomHitbox: Line2;
-  centerHitbox: TMesh;
+  centerHitbox: Mesh;
 };
 
 type TDragMode = 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none';
@@ -66,24 +58,29 @@ const LINE_WIDTH = 2;
 const DASH_SIZE = 6;
 const GAP_SIZE = 6;
 
-class CrossLine {
+export class CrossLine {
   private axialElement: HTMLElement;
   private coronalElement: HTMLElement;
   private sagittalElement: HTMLElement;
   private crossConfigs: TCrossConfig[];
-  private centerPoint: TVector3;
-  private raycaster: TRaycaster;
+  private raycaster: Raycaster;
   private isDragging: boolean;
-  private dragMode: TDragMode;
+  private dragMode: TDragMode | null;
+  private dragStartPosition: Vector2;
+  private dragStartMatrix: Matrix4;
+  // ++ 新增：用于存储旋转操作的中心点（屏幕坐标）
+  private rotationCenter: Vector2 = new Vector2();
+
   constructor(axialElement: HTMLElement, coronalElement: HTMLElement, sagittalElement: HTMLElement) {
     this.axialElement = axialElement;
     this.coronalElement = coronalElement;
     this.sagittalElement = sagittalElement;
     this.crossConfigs = [];
-    this.centerPoint = new Vector3();
     this.raycaster = new Raycaster();
     this.isDragging = false;
-    this.dragMode = 'center';
+    this.dragMode = null;
+    this.dragStartPosition = new Vector2();
+    this.dragStartMatrix = new Matrix4();
     this.init();
     this.attachEvent();
     this.animate();
@@ -103,7 +100,6 @@ class CrossLine {
     window.addEventListener('resize', this.handleResize.bind(this));
     window.addEventListener('mouseup', () => {
       this.isDragging = false;
-      // 鼠标抬起时，恢复grab相关的cursor状态
       this.crossConfigs.forEach(config => {
         config.element.style.cursor = 'auto';
       });
@@ -111,32 +107,62 @@ class CrossLine {
     this.crossConfigs.forEach(config => {
       // 鼠标按下时，开始拖拽并确定拖拽模式
       config.element.addEventListener('mousedown', e => {
-        this.isDragging = true;
         this.dragMode = this.getDragMode(e, config);
+        if (this.dragMode !== 'none') {
+          this.isDragging = true;
+          this.dragStartPosition.set(e.clientX, e.clientY);
+          this.dragStartMatrix.copy(config.matrix);
+
+          if (this.dragMode === 'rotate') {
+            const rect = config.element.getBoundingClientRect();
+            const centerPoint = new Vector3().setFromMatrixPosition(this.dragStartMatrix);
+            const { clientWidth, clientHeight } = config.element;
+            let xPixel: number, yPixel: number;
+
+            switch (config.name) {
+              case 'Axial':
+                xPixel = centerPoint.x * clientWidth;
+                yPixel = centerPoint.y * clientHeight;
+                break;
+              case 'Coronal':
+                xPixel = centerPoint.x * clientWidth;
+                yPixel = centerPoint.z * clientHeight;
+                break;
+              case 'Sagittal':
+                xPixel = centerPoint.y * clientWidth;
+                yPixel = centerPoint.z * clientHeight;
+                break;
+              default:
+                xPixel = 0;
+                yPixel = 0;
+            }
+            this.rotationCenter.set(rect.left + xPixel, rect.top + yPixel);
+          }
+        }
         console.log(this.dragMode);
       });
 
       // 鼠标移动时，根据情况更新十字线或鼠标样式
       config.element.addEventListener('mousemove', e => {
-        // if (this.isDragging) {
-        //   this.updateDragState(e, view);
-        // } else {
-        const mode = this.getDragMode(e, config);
-        switch (mode) {
-          case 'horizontal':
-          case 'vertical':
-            config.element.style.cursor = 'pointer';
-            break;
-          case 'rotate':
-            config.element.style.cursor = 'grab'; // 旋转
-            break;
-          case 'center':
-            config.element.style.cursor = 'move';
-            break;
-          default:
-            config.element.style.cursor = 'auto'; // 移动
-            break;
-          // }
+        if (this.isDragging) {
+          this.updateDragState(e, config);
+        } else {
+          const mode = this.getDragMode(e, config);
+          switch (mode) {
+            case 'horizontal':
+            case 'vertical':
+              config.element.style.cursor = 'pointer';
+              break;
+            case 'rotate':
+              config.element.style.cursor = 'grab'; // 旋转
+              break;
+            case 'center':
+              config.element.style.cursor = 'move';
+              break;
+            default:
+              config.element.style.cursor = 'auto'; // 移动
+              break;
+          }
         }
       });
 
@@ -147,7 +173,35 @@ class CrossLine {
       });
     });
   }
-  private getDragMode(e: MouseEvent, view: TCrossConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' {
+  updateDragState(e: MouseEvent, config: TCrossConfig) {
+    const rect = config.element.getBoundingClientRect();
+    if (this.dragMode === 'rotate') {
+      const startVec = new Vector2().subVectors(this.dragStartPosition, this.rotationCenter);
+      const currentVec = new Vector2(e.clientX, e.clientY).sub(this.rotationCenter);
+      const rotationAngle = currentVec.angle() - startVec.angle();
+      const rotationMatrix = new Matrix4().makeRotationZ(-rotationAngle);
+      config.matrix.multiplyMatrices(this.dragStartMatrix, rotationMatrix);
+    } else {
+      const tmpMatrix = new Matrix4();
+      const deltaX = e.clientX - this.dragStartPosition.x;
+      const deltaY = e.clientY - this.dragStartPosition.y;
+
+      const normalizedDeltaX = deltaX / rect.width;
+      const normalizedDeltaY = deltaY / rect.height;
+      if (this.dragMode === 'center') {
+        tmpMatrix.makeTranslation(normalizedDeltaX, normalizedDeltaY, 0);
+      } else if (this.dragMode === 'horizontal') {
+        // -- 修正回滚：拖拽水平线是上下移动，影响 Y 轴
+        tmpMatrix.makeTranslation(0, normalizedDeltaY, 0);
+      } else if (this.dragMode === 'vertical') {
+        // -- 修正回滚：拖拽垂直线是左右移动，影响 X 轴
+        tmpMatrix.makeTranslation(normalizedDeltaX, 0, 0);
+      }
+      config.matrix.multiplyMatrices(tmpMatrix, this.dragStartMatrix);
+    }
+    this.updateAllCrosshairs();
+  }
+  getDragMode(e: MouseEvent, view: TCrossConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' {
     const rect = view.element.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
@@ -354,11 +408,15 @@ class CrossLine {
   updateAllCrosshairs() {
     this.crossConfigs.forEach(config => {
       const { element, matrix } = config;
+      console.log(matrix);
+
       const { clientWidth, clientHeight } = element;
-      const centerPoint = this.centerPoint.setFromMatrixPosition(matrix);
+      const centerPoint = new Vector3().setFromMatrixPosition(matrix);
+
+      // ++ 新增：从矩阵中提取Z轴的旋转角度
+      const rotationZ = new Euler().setFromRotationMatrix(matrix).z;
 
       let xPixel: number, yPixel: number;
-      // 根据视图类型，从 sharedPoint 映射到像素坐标
       switch (config.name) {
         case 'Axial':
           xPixel = centerPoint.x * clientWidth;
@@ -392,7 +450,7 @@ class CrossLine {
       const vDashedBottomStart = correctedY - CENTER_GAP_SIZE;
       const vDashedBottomEnd = correctedY - DASH_ZONE_SIZE;
 
-      const p = (x: number, y: number) => this.rotatePoint(x, y, xPixel, correctedY, 0);
+      const p = (x: number, y: number) => this.rotatePoint(x, y, xPixel, correctedY, rotationZ);
 
       const [hSolidLeftStart_x, hSolidLeftStart_y] = p(hLeft, correctedY);
       const [hSolidLeftEnd_x, hSolidLeftEnd_y] = p(hDashedLeftStart, correctedY);
@@ -479,4 +537,5 @@ class CrossLine {
   }
 }
 
-export { CrossLine };
+// -- 已废弃：重复导出
+// export { CrossLine };
