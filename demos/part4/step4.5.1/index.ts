@@ -410,6 +410,7 @@ class LinkedCrosshairsApp {
       } else {
         // 水平/垂直拖拽：将增量投影到“线的法向方向”上，使拖拽总是沿着线的法向移动
         const angle = this.rotationAngle;
+
         const cos = Math.cos(angle);
         const sin = Math.sin(angle);
 
@@ -433,6 +434,8 @@ class LinkedCrosshairsApp {
 
       const normalizedDeltaX = dxPixels / rect.width;
       const normalizedDeltaY = dyPixels / rect.height;
+      console.log(normalizedDeltaX, normalizedDeltaY);
+
       this.updateByDelta(normalizedDeltaX, normalizedDeltaY, activeView.name);
     }
 

@@ -18,6 +18,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 type TCrossConfig = {
   name: 'Axial' | 'Sagittal' | 'Coronal';
   element: HTMLElement;
+  dragStartMatrix: Matrix4;
   matrix: Matrix4;
   renderer: WebGLRenderer;
   scene: Scene;
@@ -57,6 +58,7 @@ const HOT_ZONE_PADDING = 8;
 const LINE_WIDTH = 2;
 const DASH_SIZE = 6;
 const GAP_SIZE = 6;
+const DEBUGGER_OPACITY = 0.0;
 
 export class CrossLine {
   private axialElement: HTMLElement;
@@ -67,7 +69,6 @@ export class CrossLine {
   private isDragging: boolean;
   private dragMode: TDragMode | null;
   private dragStartPosition: Vector2;
-  private dragStartMatrix: Matrix4;
   // ++ 新增：用于存储旋转操作的中心点（屏幕坐标）
   private rotationCenter: Vector2 = new Vector2();
 
@@ -80,7 +81,6 @@ export class CrossLine {
     this.isDragging = false;
     this.dragMode = null;
     this.dragStartPosition = new Vector2();
-    this.dragStartMatrix = new Matrix4();
     this.init();
     this.attachEvent();
     this.animate();
@@ -111,31 +111,16 @@ export class CrossLine {
         if (this.dragMode !== 'none') {
           this.isDragging = true;
           this.dragStartPosition.set(e.clientX, e.clientY);
-          this.dragStartMatrix.copy(config.matrix);
+          this.crossConfigs.forEach(config => {
+            config.dragStartMatrix.copy(config.matrix);
+          });
 
           if (this.dragMode === 'rotate') {
             const rect = config.element.getBoundingClientRect();
-            const centerPoint = new Vector3().setFromMatrixPosition(this.dragStartMatrix);
+            const centerPoint = new Vector3().setFromMatrixPosition(config.dragStartMatrix);
             const { clientWidth, clientHeight } = config.element;
-            let xPixel: number, yPixel: number;
-
-            switch (config.name) {
-              case 'Axial':
-                xPixel = centerPoint.x * clientWidth;
-                yPixel = centerPoint.y * clientHeight;
-                break;
-              case 'Coronal':
-                xPixel = centerPoint.x * clientWidth;
-                yPixel = centerPoint.z * clientHeight;
-                break;
-              case 'Sagittal':
-                xPixel = centerPoint.y * clientWidth;
-                yPixel = centerPoint.z * clientHeight;
-                break;
-              default:
-                xPixel = 0;
-                yPixel = 0;
-            }
+            const xPixel = centerPoint.x * clientWidth;
+            const yPixel = centerPoint.y * clientHeight;
             this.rotationCenter.set(rect.left + xPixel, rect.top + yPixel);
           }
         }
@@ -180,26 +165,104 @@ export class CrossLine {
       const currentVec = new Vector2(e.clientX, e.clientY).sub(this.rotationCenter);
       const rotationAngle = currentVec.angle() - startVec.angle();
       const rotationMatrix = new Matrix4().makeRotationZ(-rotationAngle);
-      config.matrix.multiplyMatrices(this.dragStartMatrix, rotationMatrix);
+      config.matrix.multiplyMatrices(config.dragStartMatrix, rotationMatrix);
     } else {
-      const tmpMatrix = new Matrix4();
-      const deltaX = e.clientX - this.dragStartPosition.x;
-      const deltaY = e.clientY - this.dragStartPosition.y;
+      let deltaX = e.clientX - this.dragStartPosition.x;
+      let deltaY = e.clientY - this.dragStartPosition.y;
+      // 水平/垂直拖拽：将增量投影到“线的法向方向”上，使拖拽总是沿着线的法向移动
+      // 在像素坐标(y向下)下：
+      // - 水平线方向向量 dH = (cos, -sin)，其法向 nH = (sin, cos)
+      // - 垂直线方向向量 dV = (sin, cos)，其法向 nV = (cos, -sin)
+      if (this.dragMode === 'horizontal') {
+        // ++ 新增：从矩阵中提取Z轴的旋转角度
+        const rotationAngle = new Euler().setFromRotationMatrix(config.matrix).z;
+        const cos = Math.cos(rotationAngle);
+        const sin = Math.sin(rotationAngle);
+        const nx = sin;
+        const ny = cos;
+        // 投影到法向
+        const proj = deltaX * nx + deltaY * ny;
+        deltaX = nx * proj;
+        deltaY = ny * proj;
+      } else if (this.dragMode === 'vertical') {
+        const rotationAngle = new Euler().setFromRotationMatrix(config.matrix).z;
+        const cos = Math.cos(rotationAngle);
+        const sin = Math.sin(rotationAngle);
+        const nx = cos;
+        const ny = -sin;
+        const proj = deltaX * nx + deltaY * ny;
+        deltaX = nx * proj;
+        deltaY = ny * proj;
+      }
 
       const normalizedDeltaX = deltaX / rect.width;
       const normalizedDeltaY = deltaY / rect.height;
-      if (this.dragMode === 'center') {
-        tmpMatrix.makeTranslation(normalizedDeltaX, normalizedDeltaY, 0);
-      } else if (this.dragMode === 'horizontal') {
-        // -- 修正回滚：拖拽水平线是上下移动，影响 Y 轴
-        tmpMatrix.makeTranslation(0, normalizedDeltaY, 0);
-      } else if (this.dragMode === 'vertical') {
-        // -- 修正回滚：拖拽垂直线是左右移动，影响 X 轴
-        tmpMatrix.makeTranslation(normalizedDeltaX, 0, 0);
-      }
-      config.matrix.multiplyMatrices(tmpMatrix, this.dragStartMatrix);
+      this.syncMatrix(config, normalizedDeltaX, normalizedDeltaY);
     }
     this.updateAllCrosshairs();
+  }
+
+  syncMatrix(config: TCrossConfig, normalizedDeltaX: number, normalizedDeltaY: number) {
+    const axialConfig = this.crossConfigs.find(c => c.name === 'Axial')!;
+    const coronalConfig = this.crossConfigs.find(c => c.name === 'Coronal')!;
+    const sagittalConfig = this.crossConfigs.find(c => c.name === 'Sagittal')!;
+    const translationMatrix = new Matrix4().makeTranslation(normalizedDeltaX, normalizedDeltaY, 0);
+    switch (config.name) {
+      case 'Axial':
+        if (this.dragMode === 'center') {
+          axialConfig.matrix.multiplyMatrices(translationMatrix, axialConfig.dragStartMatrix);
+          const coronalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
+          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaY, 0, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+        } else if (this.dragMode === 'horizontal') {
+          axialConfig.matrix.multiplyMatrices(translationMatrix, axialConfig.dragStartMatrix);
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaY, 0, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+        } else if (this.dragMode === 'vertical') {
+          axialConfig.matrix.multiplyMatrices(translationMatrix, axialConfig.dragStartMatrix);
+          const coronalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
+          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
+        }
+        break;
+      case 'Coronal':
+        if (this.dragMode === 'center') {
+          coronalConfig.matrix.multiplyMatrices(translationMatrix, coronalConfig.dragStartMatrix);
+          const axialTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
+          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+        } else if (this.dragMode === 'horizontal') {
+          coronalConfig.matrix.multiplyMatrices(translationMatrix, coronalConfig.dragStartMatrix);
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+        } else if (this.dragMode === 'vertical') {
+          coronalConfig.matrix.multiplyMatrices(translationMatrix, coronalConfig.dragStartMatrix);
+          const axialTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
+          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
+        }
+        break;
+      case 'Sagittal':
+        if (this.dragMode === 'center') {
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, normalizedDeltaY, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+          const axialTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaX, 0);
+          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
+          const coronalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
+          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
+        } else if (this.dragMode === 'horizontal') {
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+          const coronalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
+          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
+        } else if (this.dragMode === 'vertical') {
+          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
+          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
+          const axialTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaX, 0);
+          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
+        }
+        break;
+    }
   }
   getDragMode(e: MouseEvent, view: TCrossConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' {
     const rect = view.element.getBoundingClientRect();
@@ -297,7 +360,7 @@ export class CrossLine {
     const hitboxMaterial = new LineMaterial({
       linewidth: HOT_ZONE_PADDING * 2,
       transparent: true,
-      opacity: 0.5, // 暂时设为半透明以便观察
+      opacity: DEBUGGER_OPACITY, // 暂时设为半透明以便观察
       color: 0xff0000, // 暂时设为红色以便观察
       dashed: false,
     });
@@ -342,7 +405,7 @@ export class CrossLine {
     const verticalDashedBottomHitbox = this.createHitboxLine(element);
 
     const centerHitboxGeometry = new PlaneGeometry(CENTER_GAP_SIZE * 2, CENTER_GAP_SIZE * 2);
-    const centerHitboxMaterial = new MeshBasicMaterial({ transparent: true, opacity: 0.5, color: 0xff0000 });
+    const centerHitboxMaterial = new MeshBasicMaterial({ transparent: true, opacity: DEBUGGER_OPACITY, color: 0xff0000 });
     const centerHitbox = new Mesh(centerHitboxGeometry, centerHitboxMaterial);
 
     scene.add(
@@ -367,6 +430,7 @@ export class CrossLine {
     const config: TCrossConfig = {
       name,
       element,
+      dragStartMatrix: new Matrix4(),
       matrix: new Matrix4().setPosition(0.5, 0.5, 0.5),
       renderer: renderer,
       scene: scene,
@@ -408,7 +472,6 @@ export class CrossLine {
   updateAllCrosshairs() {
     this.crossConfigs.forEach(config => {
       const { element, matrix } = config;
-      console.log(matrix);
 
       const { clientWidth, clientHeight } = element;
       const centerPoint = new Vector3().setFromMatrixPosition(matrix);
@@ -416,22 +479,8 @@ export class CrossLine {
       // ++ 新增：从矩阵中提取Z轴的旋转角度
       const rotationZ = new Euler().setFromRotationMatrix(matrix).z;
 
-      let xPixel: number, yPixel: number;
-      switch (config.name) {
-        case 'Axial':
-          xPixel = centerPoint.x * clientWidth;
-          yPixel = centerPoint.y * clientHeight;
-          break;
-        case 'Coronal':
-          xPixel = centerPoint.x * clientWidth;
-          yPixel = centerPoint.z * clientHeight;
-          break;
-        case 'Sagittal':
-          xPixel = centerPoint.y * clientWidth;
-          yPixel = centerPoint.z * clientHeight;
-          break;
-      }
-
+      const xPixel = centerPoint.x * clientWidth;
+      const yPixel = centerPoint.y * clientHeight;
       const correctedY = clientHeight - yPixel;
 
       const diagonal = Math.sqrt(clientWidth ** 2 + clientHeight ** 2);
@@ -536,6 +585,3 @@ export class CrossLine {
     });
   }
 }
-
-// -- 已废弃：重复导出
-// export { CrossLine };
