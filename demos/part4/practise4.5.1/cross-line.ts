@@ -9,7 +9,9 @@ import {
   Mesh,
   PlaneGeometry,
   MeshBasicMaterial,
-  Euler, // ++ 导入 Euler
+  Euler,
+  Group,
+  Quaternion,
 } from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry';
@@ -18,11 +20,13 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 type TCrossConfig = {
   name: 'Axial' | 'Sagittal' | 'Coronal';
   element: HTMLElement;
+  rect: DOMRect;
   dragStartMatrix: Matrix4;
   matrix: Matrix4;
   renderer: WebGLRenderer;
   scene: Scene;
   camera: OrthographicCamera;
+  crosshairGroup: Group;
   horizontalSolidLeft: Line2;
   horizontalSolidRight: Line2;
   verticalSolidTop: Line2;
@@ -67,9 +71,8 @@ export class CrossLine {
   private crossConfigs: TCrossConfig[];
   private raycaster: Raycaster;
   private isDragging: boolean;
-  private dragMode: TDragMode | null;
+  private dragMode: TDragMode;
   private dragStartPosition: Vector2;
-  // ++ 新增：用于存储旋转操作的中心点（屏幕坐标）
   private rotationCenter: Vector2 = new Vector2();
 
   constructor(axialElement: HTMLElement, coronalElement: HTMLElement, sagittalElement: HTMLElement) {
@@ -79,7 +82,7 @@ export class CrossLine {
     this.crossConfigs = [];
     this.raycaster = new Raycaster();
     this.isDragging = false;
-    this.dragMode = null;
+    this.dragMode = 'none';
     this.dragStartPosition = new Vector2();
     this.init();
     this.attachEvent();
@@ -96,6 +99,7 @@ export class CrossLine {
       renderer.render(scene, camera);
     });
   }
+
   attachEvent() {
     window.addEventListener('resize', this.handleResize.bind(this));
     window.addEventListener('mouseup', () => {
@@ -105,7 +109,6 @@ export class CrossLine {
       });
     });
     this.crossConfigs.forEach(config => {
-      // 鼠标按下时，开始拖拽并确定拖拽模式
       config.element.addEventListener('mousedown', e => {
         this.dragMode = this.getDragMode(e, config);
         if (this.dragMode !== 'none') {
@@ -116,18 +119,15 @@ export class CrossLine {
           });
 
           if (this.dragMode === 'rotate') {
-            const rect = config.element.getBoundingClientRect();
+            const { rect } = config;
             const centerPoint = new Vector3().setFromMatrixPosition(config.dragStartMatrix);
-            const { clientWidth, clientHeight } = config.element;
-            const xPixel = centerPoint.x * clientWidth;
-            const yPixel = centerPoint.y * clientHeight;
-            this.rotationCenter.set(rect.left + xPixel, rect.top + yPixel);
+            // 修正：将 three.js 的 Y 坐标（原点在下）转换成屏幕 Y 坐标（原点在上）
+            const screenY = rect.top + (rect.height - centerPoint.y);
+            this.rotationCenter.set(rect.left + centerPoint.x, screenY);
           }
         }
-        console.log(this.dragMode);
       });
 
-      // 鼠标移动时，根据情况更新十字线或鼠标样式
       config.element.addEventListener('mousemove', e => {
         if (this.isDragging) {
           this.updateDragState(e, config);
@@ -151,7 +151,6 @@ export class CrossLine {
         }
       });
 
-      // 鼠标移出视图时，恢复默认鼠标样式
       config.element.addEventListener('mouseleave', () => {
         config.element.style.cursor = 'auto';
         this.isDragging = false;
@@ -159,113 +158,162 @@ export class CrossLine {
     });
   }
   updateDragState(e: MouseEvent, config: TCrossConfig) {
-    const rect = config.element.getBoundingClientRect();
     if (this.dragMode === 'rotate') {
       const startVec = new Vector2().subVectors(this.dragStartPosition, this.rotationCenter);
       const currentVec = new Vector2(e.clientX, e.clientY).sub(this.rotationCenter);
       const rotationAngle = currentVec.angle() - startVec.angle();
       const rotationMatrix = new Matrix4().makeRotationZ(-rotationAngle);
+      // 正确的顺序是 M_new = M_start * R_delta，这代表在本地坐标系下进行旋转。
       config.matrix.multiplyMatrices(config.dragStartMatrix, rotationMatrix);
     } else {
-      let deltaX = e.clientX - this.dragStartPosition.x;
-      let deltaY = e.clientY - this.dragStartPosition.y;
-      // 水平/垂直拖拽：将增量投影到“线的法向方向”上，使拖拽总是沿着线的法向移动
-      // 在像素坐标(y向下)下：
-      // - 水平线方向向量 dH = (cos, -sin)，其法向 nH = (sin, cos)
-      // - 垂直线方向向量 dV = (sin, cos)，其法向 nV = (cos, -sin)
-      if (this.dragMode === 'horizontal') {
-        // ++ 新增：从矩阵中提取Z轴的旋转角度
-        const rotationAngle = new Euler().setFromRotationMatrix(config.matrix).z;
-        const cos = Math.cos(rotationAngle);
-        const sin = Math.sin(rotationAngle);
-        const nx = sin;
-        const ny = cos;
-        // 投影到法向
-        const proj = deltaX * nx + deltaY * ny;
-        deltaX = nx * proj;
-        deltaY = ny * proj;
-      } else if (this.dragMode === 'vertical') {
-        const rotationAngle = new Euler().setFromRotationMatrix(config.matrix).z;
-        const cos = Math.cos(rotationAngle);
-        const sin = Math.sin(rotationAngle);
-        const nx = cos;
-        const ny = -sin;
-        const proj = deltaX * nx + deltaY * ny;
-        deltaX = nx * proj;
-        deltaY = ny * proj;
-      }
+      const mouseCurrent = new Vector2(e.clientX, e.clientY);
+      const mouseDelta = new Vector2().subVectors(mouseCurrent, this.dragStartPosition);
 
-      const normalizedDeltaX = deltaX / rect.width;
-      const normalizedDeltaY = deltaY / rect.height;
-      this.syncMatrix(config, normalizedDeltaX, normalizedDeltaY);
+      this.syncMatrix(config.name, this.dragMode, mouseDelta);
     }
     this.updateAllCrosshairs();
   }
+  /**
+   * @description 获取在拖拽对象局部坐标系下的位移
+   * @param config 我们正在操作的十字线的配置 (例如 axialConfig)，因为它包含了当前的旋转矩阵。
+   * @param axis 我们关心的是这个十字线的哪个局部轴？'x' 对应垂直线, 'y' 对应水平线。
+   * @param mouseDelta 鼠标在屏幕空间中的原始位移向量。
+   * @returns 经过计算后，在局部轴上的有效位移量（一个数字）。
+   */
+  private getDragDeltaInLocalSpace(matrix: Matrix4, axis: 'x' | 'y', mouseDelta: Vector2) {
+    const radian = new Euler().setFromRotationMatrix(matrix).z;
+    const cos = Math.cos(radian);
+    const sin = Math.sin(radian);
 
-  syncMatrix(config: TCrossConfig, normalizedDeltaX: number, normalizedDeltaY: number) {
+    let normalVector: Vector2;
+
+    if (axis === 'x') {
+      // (垂直线) 的法向量是局部 X 轴
+      normalVector = new Vector2(cos, -sin);
+    } else {
+      // (水平线) 的法向量是局部 Y 轴
+      normalVector = new Vector2(sin, cos);
+    }
+
+    // 投影到法向量上的差值
+    return mouseDelta.dot(normalVector);
+  }
+  // 获取投影长度
+  getTotalProjectedLength(matrix: Matrix4, axis: 'x' | 'y', rect: DOMRect) {
+    // 从矩阵中获取旋转角度 theta
+    const theta = new Euler().setFromRotationMatrix(matrix).z;
+
+    // 根据我们是拖动'vertical'线还是'horizontal'线，确定投影轴的角度 alpha
+    let alpha;
+    if (axis === 'x') {
+      // 拖动垂直线，运动轴是局部X轴
+      alpha = theta;
+    } else {
+      // 拖动水平线，运动轴是局部Y轴
+      alpha = theta + Math.PI / 2; // Y轴比X轴超前90度
+    }
+
+    // 应用公式
+    const w = rect.width;
+    const h = rect.height;
+    const totalLength = w * Math.abs(Math.cos(alpha)) + h * Math.abs(Math.sin(alpha));
+
+    return totalLength;
+  }
+  // 根据比例转换位移
+  convertDeltaByRatio(
+    sourceConfig: TCrossConfig,
+    targetConfig: TCrossConfig,
+    sourceAxis: 'x' | 'y',
+    targetAxis: 'x' | 'y',
+    localDelta: number,
+  ) {
+    const sourceTotalLength = this.getTotalProjectedLength(sourceConfig.dragStartMatrix, sourceAxis, sourceConfig.rect);
+    const targetTotalLength = this.getTotalProjectedLength(targetConfig.dragStartMatrix, targetAxis, targetConfig.rect);
+    const deltaRatio = localDelta / sourceTotalLength;
+    const targetPixelDelta = deltaRatio * targetTotalLength;
+    return targetPixelDelta;
+  }
+  // 应用局部位移
+  applyLocalTranslation(config: TCrossConfig, axis: 'x' | 'y', distance: number) {
+    const translationMatrix = this.translateOnLocalAxis(config.dragStartMatrix, axis, distance);
+    config.matrix.multiplyMatrices(translationMatrix, config.dragStartMatrix);
+  }
+  syncMatrix(name: 'Axial' | 'Sagittal' | 'Coronal', dragMode: TDragMode, mouseDelta: Vector2) {
     const axialConfig = this.crossConfigs.find(c => c.name === 'Axial')!;
     const coronalConfig = this.crossConfigs.find(c => c.name === 'Coronal')!;
     const sagittalConfig = this.crossConfigs.find(c => c.name === 'Sagittal')!;
-    const translationMatrix = new Matrix4().makeTranslation(normalizedDeltaX, normalizedDeltaY, 0);
-    switch (config.name) {
+    switch (name) {
       case 'Axial':
-        if (this.dragMode === 'center') {
+        if (dragMode === 'center') {
+          const translationMatrix = new Matrix4().makeTranslation(mouseDelta.x, -mouseDelta.y, 0);
           axialConfig.matrix.multiplyMatrices(translationMatrix, axialConfig.dragStartMatrix);
-          const coronalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
-          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaY, 0, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-        } else if (this.dragMode === 'horizontal') {
-          axialConfig.matrix.multiplyMatrices(translationMatrix, axialConfig.dragStartMatrix);
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaY, 0, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-        } else if (this.dragMode === 'vertical') {
-          axialConfig.matrix.multiplyMatrices(translationMatrix, axialConfig.dragStartMatrix);
-          const coronalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
-          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
+          const localDeltaY = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'y', mouseDelta);
+          const targetPixelDeltaY = this.convertDeltaByRatio(axialConfig, sagittalConfig, 'y', 'x', localDeltaY);
+          this.applyLocalTranslation(sagittalConfig, 'x', targetPixelDeltaY);
+          const localDeltaX = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'x', mouseDelta);
+          const targetPixelDeltaX = this.convertDeltaByRatio(axialConfig, coronalConfig, 'x', 'x', localDeltaX);
+          this.applyLocalTranslation(coronalConfig, 'x', targetPixelDeltaX);
+        } else if (dragMode === 'horizontal') {
+          const localDeltaY = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'y', mouseDelta);
+          this.applyLocalTranslation(axialConfig, 'y', -localDeltaY);
+          const targetPixelDeltaY = this.convertDeltaByRatio(axialConfig, sagittalConfig, 'y', 'x', localDeltaY);
+          this.applyLocalTranslation(sagittalConfig, 'x', targetPixelDeltaY);
+        } else if (dragMode === 'vertical') {
+          const localDeltaX = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'x', mouseDelta);
+          this.applyLocalTranslation(axialConfig, 'x', localDeltaX);
+          const targetPixelDeltaX = this.convertDeltaByRatio(axialConfig, coronalConfig, 'x', 'x', localDeltaX);
+          this.applyLocalTranslation(coronalConfig, 'x', targetPixelDeltaX);
         }
         break;
       case 'Coronal':
-        if (this.dragMode === 'center') {
+        if (dragMode === 'center') {
+          const translationMatrix = new Matrix4().makeTranslation(mouseDelta.x, -mouseDelta.y, 0);
           coronalConfig.matrix.multiplyMatrices(translationMatrix, coronalConfig.dragStartMatrix);
-          const axialTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
-          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-        } else if (this.dragMode === 'horizontal') {
-          coronalConfig.matrix.multiplyMatrices(translationMatrix, coronalConfig.dragStartMatrix);
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-        } else if (this.dragMode === 'vertical') {
-          coronalConfig.matrix.multiplyMatrices(translationMatrix, coronalConfig.dragStartMatrix);
-          const axialTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
-          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
+          const localDeltaY = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'y', mouseDelta);
+          const targetPixelDeltaY = this.convertDeltaByRatio(coronalConfig, sagittalConfig, 'y', 'y', localDeltaY);
+          this.applyLocalTranslation(sagittalConfig, 'y', -targetPixelDeltaY);
+          const localDeltaX = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'x', mouseDelta);
+          const targetPixelDeltaX = this.convertDeltaByRatio(coronalConfig, axialConfig, 'x', 'x', localDeltaX);
+          this.applyLocalTranslation(axialConfig, 'x', targetPixelDeltaX);
+        } else if (dragMode === 'horizontal') {
+          const localDeltaY = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'y', mouseDelta);
+          this.applyLocalTranslation(coronalConfig, 'y', -localDeltaY);
+          const targetPixelDeltaY = this.convertDeltaByRatio(coronalConfig, sagittalConfig, 'y', 'y', localDeltaY);
+          this.applyLocalTranslation(sagittalConfig, 'y', -targetPixelDeltaY);
+        } else if (dragMode === 'vertical') {
+          const localDeltaX = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'x', mouseDelta);
+          this.applyLocalTranslation(coronalConfig, 'x', localDeltaX);
+          const targetPixelDeltaX = this.convertDeltaByRatio(coronalConfig, axialConfig, 'x', 'x', localDeltaX);
+          this.applyLocalTranslation(axialConfig, 'x', targetPixelDeltaX);
         }
         break;
       case 'Sagittal':
-        if (this.dragMode === 'center') {
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, normalizedDeltaY, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-          const axialTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaX, 0);
-          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
-          const coronalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
-          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
-        } else if (this.dragMode === 'horizontal') {
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-          const coronalTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaY, 0);
-          coronalConfig.matrix.multiplyMatrices(coronalTmpMatrix, coronalConfig.dragStartMatrix);
-        } else if (this.dragMode === 'vertical') {
-          const sagittalTmpMatrix = new Matrix4().makeTranslation(normalizedDeltaX, 0, 0);
-          sagittalConfig.matrix.multiplyMatrices(sagittalTmpMatrix, sagittalConfig.dragStartMatrix);
-          const axialTmpMatrix = new Matrix4().makeTranslation(0, normalizedDeltaX, 0);
-          axialConfig.matrix.multiplyMatrices(axialTmpMatrix, axialConfig.dragStartMatrix);
+        if (dragMode === 'center') {
+          const translationMatrix = new Matrix4().makeTranslation(mouseDelta.x, -mouseDelta.y, 0);
+          sagittalConfig.matrix.multiplyMatrices(translationMatrix, sagittalConfig.dragStartMatrix);
+          const localDeltaY = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'y', mouseDelta);
+          const targetPixelDeltaY = this.convertDeltaByRatio(sagittalConfig, coronalConfig, 'y', 'y', localDeltaY);
+          this.applyLocalTranslation(coronalConfig, 'y', -targetPixelDeltaY);
+          const localDeltaX = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'x', mouseDelta);
+          const targetPixelDeltaX = this.convertDeltaByRatio(sagittalConfig, axialConfig, 'x', 'y', localDeltaX);
+          this.applyLocalTranslation(axialConfig, 'y', -targetPixelDeltaX);
+        } else if (dragMode === 'horizontal') {
+          const localDeltaY = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'y', mouseDelta);
+          this.applyLocalTranslation(sagittalConfig, 'y', -localDeltaY);
+          const targetPixelDeltaY = this.convertDeltaByRatio(sagittalConfig, coronalConfig, 'y', 'y', localDeltaY);
+          this.applyLocalTranslation(coronalConfig, 'y', -targetPixelDeltaY);
+        } else if (dragMode === 'vertical') {
+          const localDeltaX = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'x', mouseDelta);
+          this.applyLocalTranslation(sagittalConfig, 'x', localDeltaX);
+          const targetPixelDeltaX = this.convertDeltaByRatio(sagittalConfig, axialConfig, 'x', 'y', localDeltaX);
+          this.applyLocalTranslation(axialConfig, 'y', -targetPixelDeltaX);
         }
         break;
     }
   }
-  getDragMode(e: MouseEvent, view: TCrossConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' {
-    const rect = view.element.getBoundingClientRect();
+  getDragMode(e: MouseEvent, config: TCrossConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' {
+    const { rect } = config;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
@@ -275,41 +323,38 @@ export class CrossLine {
     mouseNDC.y = -(mouseY / rect.height) * 2 + 1;
 
     // 2. 从 UI 相机发射射线
-    this.raycaster.setFromCamera(mouseNDC, view.camera);
+    this.raycaster.setFromCamera(mouseNDC, config.camera);
 
-    // 4. 获取所有需要检测的 *热区线*
     const linesToCheck = [
-      view.horizontalSolidLeftHitbox,
-      view.horizontalSolidRightHitbox,
-      view.verticalSolidTopHitbox,
-      view.verticalSolidBottomHitbox,
-      view.horizontalDashedLeftHitbox,
-      view.horizontalDashedRightHitbox,
-      view.verticalDashedTopHitbox,
-      view.verticalDashedBottomHitbox,
-      view.centerHitbox,
+      config.horizontalSolidLeftHitbox,
+      config.horizontalSolidRightHitbox,
+      config.verticalSolidTopHitbox,
+      config.verticalSolidBottomHitbox,
+      config.horizontalDashedLeftHitbox,
+      config.horizontalDashedRightHitbox,
+      config.verticalDashedTopHitbox,
+      config.verticalDashedBottomHitbox,
+      config.centerHitbox,
     ];
 
-    // 5. 执行相交检测
     const intersects = this.raycaster.intersectObjects(linesToCheck);
 
     if (intersects.length > 0) {
       const intersectedObject = intersects[0].object;
 
-      // 6. 根据相交的 *热区线* 判断模式
       switch (intersectedObject) {
-        case view.centerHitbox:
+        case config.centerHitbox:
           return 'center';
-        case view.horizontalDashedLeftHitbox:
-        case view.horizontalDashedRightHitbox:
+        case config.horizontalDashedLeftHitbox:
+        case config.horizontalDashedRightHitbox:
           return 'horizontal';
-        case view.verticalDashedTopHitbox:
-        case view.verticalDashedBottomHitbox:
+        case config.verticalDashedTopHitbox:
+        case config.verticalDashedBottomHitbox:
           return 'vertical';
-        case view.horizontalSolidLeftHitbox:
-        case view.horizontalSolidRightHitbox:
-        case view.verticalSolidTopHitbox:
-        case view.verticalSolidBottomHitbox:
+        case config.horizontalSolidLeftHitbox:
+        case config.horizontalSolidRightHitbox:
+        case config.verticalSolidTopHitbox:
+        case config.verticalSolidBottomHitbox:
           return 'rotate';
         default:
           return 'none';
@@ -319,21 +364,36 @@ export class CrossLine {
   }
   handleResize() {
     this.crossConfigs.forEach(config => {
-      const { element, renderer, camera, scene } = config;
-      const { clientWidth, clientHeight } = element;
-      // 1. 更新渲染器尺寸
-      renderer.setSize(clientWidth, clientHeight);
-      // 2. 更新相机视锥
+      const { element, renderer, camera, scene, matrix, rect: oldRect } = config;
+
+      const oldPosition = new Vector3();
+      const oldQuaternion = new Quaternion();
+      const oldScale = new Vector3();
+      matrix.decompose(oldPosition, oldQuaternion, oldScale);
+
+      const xRatio = oldRect.width > 0 ? oldPosition.x / oldRect.width : 0.5;
+      const yRatio = oldRect.height > 0 ? oldPosition.y / oldRect.height : 0.5;
+
+      const newRect = element.getBoundingClientRect();
+      config.rect = newRect;
+      const { width: newWidth, height: newHeight } = newRect;
+
+      // 4. 根据比例和新尺寸，计算出新的绝对位置
+      const newPosition = new Vector3(xRatio * newWidth, yRatio * newHeight, oldPosition.z);
+
+      matrix.compose(newPosition, oldQuaternion, oldScale);
+
+      renderer.setSize(newWidth, newHeight);
       camera.left = 0;
-      camera.right = clientWidth;
-      camera.top = clientHeight;
+      camera.right = newWidth;
+      camera.top = newHeight;
       camera.bottom = 0;
       camera.updateProjectionMatrix();
-      // 3. 更新所有线条材质的分辨率
+
       scene.children.forEach(child => {
         if (child instanceof Line2) {
           const lineMaterial = child.material as LineMaterial;
-          lineMaterial.resolution.set(clientWidth, clientHeight);
+          lineMaterial.resolution.set(newWidth, newHeight);
         }
       });
     });
@@ -369,6 +429,9 @@ export class CrossLine {
     return lineHitbox;
   }
   createConfig(element: HTMLElement, name: 'Axial' | 'Sagittal' | 'Coronal') {
+    const rect = element.getBoundingClientRect();
+    const dragStartMatrix = new Matrix4();
+    const matrix = new Matrix4().makeTranslation(rect.width / 2, rect.height - rect.height / 2, 0);
     let horizontalColor: TColors = COLORS.CORONAL;
     let verticalColor: TColors = COLORS.SAGITTAL;
     if (name === 'Coronal') {
@@ -379,6 +442,7 @@ export class CrossLine {
       verticalColor = COLORS.CORONAL;
     }
     const { clientWidth, clientHeight } = element;
+
     const renderer = new WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(clientWidth, clientHeight);
@@ -386,6 +450,9 @@ export class CrossLine {
     const scene = new Scene();
     const camera = new OrthographicCamera(0, clientWidth, clientHeight, 0, 0.1, 1);
     camera.position.z = 1;
+
+    const crosshairGroup = new Group();
+    crosshairGroup.matrixAutoUpdate = false;
     const horizontalSolidLeft = this.createLine(element, horizontalColor, false);
     const horizontalSolidRight = this.createLine(element, horizontalColor, false);
     const verticalSolidTop = this.createLine(element, verticalColor, false);
@@ -408,7 +475,7 @@ export class CrossLine {
     const centerHitboxMaterial = new MeshBasicMaterial({ transparent: true, opacity: DEBUGGER_OPACITY, color: 0xff0000 });
     const centerHitbox = new Mesh(centerHitboxGeometry, centerHitboxMaterial);
 
-    scene.add(
+    crosshairGroup.add(
       horizontalSolidLeft,
       horizontalSolidRight,
       verticalSolidTop,
@@ -427,14 +494,19 @@ export class CrossLine {
       verticalDashedBottomHitbox,
       centerHitbox,
     );
+    scene.add(crosshairGroup);
+    console.log(matrix);
+
     const config: TCrossConfig = {
       name,
       element,
-      dragStartMatrix: new Matrix4(),
-      matrix: new Matrix4().setPosition(0.5, 0.5, 0.5),
+      rect,
+      dragStartMatrix,
+      matrix,
       renderer: renderer,
       scene: scene,
       camera: camera,
+      crosshairGroup,
       horizontalSolidLeft,
       horizontalSolidRight,
       verticalSolidTop,
@@ -462,126 +534,102 @@ export class CrossLine {
     const sagittalConfig = this.createConfig(this.sagittalElement, 'Sagittal');
     this.crossConfigs.push(axialConfig, coronalConfig, sagittalConfig);
   }
-  rotatePoint(x: number, y: number, cx: number, cy: number, radian: number) {
-    const cos = Math.cos(radian);
-    const sin = Math.sin(radian);
-    const npx = cx + (x - cx) * cos - (y - cy) * sin;
-    const npy = cy + (x - cx) * sin + (y - cy) * cos;
-    return [npx, npy];
+  translateOnLocalAxis(matrix: Matrix4, axis: 'x' | 'y', distance: number) {
+    const localAxisVector = new Vector3();
+    const translationMatrix = new Matrix4();
+    switch (axis) {
+      case 'x':
+        localAxisVector.setFromMatrixColumn(matrix, 0);
+        break;
+      case 'y':
+        localAxisVector.setFromMatrixColumn(matrix, 1);
+        break;
+      default:
+        console.error("无效的轴参数。请使用 'x' 或 'y'。");
+        return translationMatrix;
+    }
+
+    localAxisVector.normalize();
+    localAxisVector.multiplyScalar(distance);
+
+    translationMatrix.makeTranslation(localAxisVector.x, localAxisVector.y, localAxisVector.z);
+
+    return translationMatrix;
+    // matrix.premultiply(translationMatrix);
   }
   updateAllCrosshairs() {
     this.crossConfigs.forEach(config => {
-      const { element, matrix } = config;
+      const { element, matrix, crosshairGroup } = config;
 
       const { clientWidth, clientHeight } = element;
-      const centerPoint = new Vector3().setFromMatrixPosition(matrix);
 
-      // ++ 新增：从矩阵中提取Z轴的旋转角度
-      const rotationZ = new Euler().setFromRotationMatrix(matrix).z;
+      // 1. 更新 Group 的位置和旋转
+      crosshairGroup.matrix.copy(matrix);
 
-      const xPixel = centerPoint.x * clientWidth;
-      const yPixel = centerPoint.y * clientHeight;
-      const correctedY = clientHeight - yPixel;
-
+      // 2. 更新所有线段的几何体 (现在坐标是相对于 Group 中心的)
       const diagonal = Math.sqrt(clientWidth ** 2 + clientHeight ** 2);
 
-      const hLeft = xPixel - diagonal;
-      const hRight = xPixel + diagonal;
-      const hDashedLeftStart = xPixel - DASH_ZONE_SIZE;
-      const hDashedLeftEnd = xPixel - CENTER_GAP_SIZE;
-      const hDashedRightStart = xPixel + CENTER_GAP_SIZE;
-      const hDashedRightEnd = xPixel + DASH_ZONE_SIZE;
+      // 定义相对于中心点 (0,0) 的坐标
+      const hLeft = -diagonal;
+      const hRight = diagonal;
+      const hDashedLeftStart = -DASH_ZONE_SIZE;
+      const hDashedLeftEnd = -CENTER_GAP_SIZE;
+      const hDashedRightStart = CENTER_GAP_SIZE;
+      const hDashedRightEnd = DASH_ZONE_SIZE;
 
-      const vTop = correctedY + diagonal;
-      const vBottom = correctedY - diagonal;
-      const vDashedTopStart = correctedY + DASH_ZONE_SIZE;
-      const vDashedTopEnd = correctedY + CENTER_GAP_SIZE;
-      const vDashedBottomStart = correctedY - CENTER_GAP_SIZE;
-      const vDashedBottomEnd = correctedY - DASH_ZONE_SIZE;
+      const vTop = diagonal;
+      const vBottom = -diagonal;
+      const vDashedTopStart = DASH_ZONE_SIZE;
+      const vDashedTopEnd = CENTER_GAP_SIZE;
+      const vDashedBottomStart = -CENTER_GAP_SIZE;
+      const vDashedBottomEnd = -DASH_ZONE_SIZE;
 
-      const p = (x: number, y: number) => this.rotatePoint(x, y, xPixel, correctedY, rotationZ);
+      // 更新可见线段
+      (config.horizontalSolidLeft.geometry as LineGeometry).setPositions([hLeft, 0, 0, hDashedLeftStart, 0, 0]);
+      (config.horizontalSolidRight.geometry as LineGeometry).setPositions([hDashedRightEnd, 0, 0, hRight, 0, 0]);
+      (config.horizontalDashedLeft.geometry as LineGeometry).setPositions([hDashedLeftStart, 0, 0, hDashedLeftEnd, 0, 0]);
+      (config.horizontalDashedRight.geometry as LineGeometry).setPositions([hDashedRightStart, 0, 0, hDashedRightEnd, 0, 0]);
+      (config.verticalSolidTop.geometry as LineGeometry).setPositions([0, vDashedTopStart, 0, 0, vTop, 0]);
+      (config.verticalSolidBottom.geometry as LineGeometry).setPositions([0, vBottom, 0, 0, vDashedBottomEnd, 0]);
+      (config.verticalDashedTop.geometry as LineGeometry).setPositions([0, vDashedTopEnd, 0, 0, vDashedTopStart, 0]);
+      (config.verticalDashedBottom.geometry as LineGeometry).setPositions([0, vDashedBottomStart, 0, 0, vDashedBottomEnd, 0]);
 
-      const [hSolidLeftStart_x, hSolidLeftStart_y] = p(hLeft, correctedY);
-      const [hSolidLeftEnd_x, hSolidLeftEnd_y] = p(hDashedLeftStart, correctedY);
-      const [hSolidRightStart_x, hSolidRightStart_y] = p(hDashedRightEnd, correctedY);
-      const [hSolidRightEnd_x, hSolidRightEnd_y] = p(hRight, correctedY);
-
-      const [hDashedLeftStart_x, hDashedLeftStart_y] = p(hDashedLeftStart, correctedY);
-      const [hDashedLeftEnd_x, hDashedLeftEnd_y] = p(hDashedLeftEnd, correctedY);
-      const [hDashedRightStart_x, hDashedRightStart_y] = p(hDashedRightStart, correctedY);
-      const [hDashedRightEnd_x, hDashedRightEnd_y] = p(hDashedRightEnd, correctedY);
-
-      const [vSolidTopStart_x, vSolidTopStart_y] = p(xPixel, vTop);
-      const [vSolidTopEnd_x, vSolidTopEnd_y] = p(xPixel, vDashedTopStart);
-      const [vSolidBottomStart_x, vSolidBottomStart_y] = p(xPixel, vDashedBottomEnd);
-      const [vSolidBottomEnd_x, vSolidBottomEnd_y] = p(xPixel, vBottom);
-
-      const [vDashedTopStart_x, vDashedTopStart_y] = p(xPixel, vDashedTopStart);
-      const [vDashedTopEnd_x, vDashedTopEnd_y] = p(xPixel, vDashedTopEnd);
-      const [vDashedBottomStart_x, vDashedBottomStart_y] = p(xPixel, vDashedBottomStart);
-      const [vDashedBottomEnd_x, vDashedBottomEnd_y] = p(xPixel, vDashedBottomEnd);
-
-      const hSolidLeftGeom = config.horizontalSolidLeft.geometry as LineGeometry;
-      const hSolidRightGeom = config.horizontalSolidRight.geometry as LineGeometry;
-      const hDashedLeftGeom = config.horizontalDashedLeft.geometry as LineGeometry;
-      const hDashedRightGeom = config.horizontalDashedRight.geometry as LineGeometry;
-      const vSolidTopGeom = config.verticalSolidTop.geometry as LineGeometry;
-      const vSolidBottomGeom = config.verticalSolidBottom.geometry as LineGeometry;
-      const vDashedTopGeom = config.verticalDashedTop.geometry as LineGeometry;
-      const vDashedBottomGeom = config.verticalDashedBottom.geometry as LineGeometry;
-
-      hSolidLeftGeom.setPositions([hSolidLeftStart_x, hSolidLeftStart_y, 0, hSolidLeftEnd_x, hSolidLeftEnd_y, 0]);
-      hSolidRightGeom.setPositions([hSolidRightStart_x, hSolidRightStart_y, 0, hSolidRightEnd_x, hSolidRightEnd_y, 0]);
-      hDashedLeftGeom.setPositions([hDashedLeftStart_x, hDashedLeftStart_y, 0, hDashedLeftEnd_x, hDashedLeftEnd_y, 0]);
-      hDashedRightGeom.setPositions([hDashedRightStart_x, hDashedRightStart_y, 0, hDashedRightEnd_x, hDashedRightEnd_y, 0]);
-      vSolidTopGeom.setPositions([vSolidTopStart_x, vSolidTopStart_y, 0, vSolidTopEnd_x, vSolidTopEnd_y, 0]);
-      vSolidBottomGeom.setPositions([vSolidBottomStart_x, vSolidBottomStart_y, 0, vSolidBottomEnd_x, vSolidBottomEnd_y, 0]);
-      vDashedTopGeom.setPositions([vDashedTopStart_x, vDashedTopStart_y, 0, vDashedTopEnd_x, vDashedTopEnd_y, 0]);
-      vDashedBottomGeom.setPositions([vDashedBottomStart_x, vDashedBottomStart_y, 0, vDashedBottomEnd_x, vDashedBottomEnd_y, 0]);
-
-      config.horizontalSolidLeft.computeLineDistances();
-      config.horizontalSolidRight.computeLineDistances();
-      config.horizontalDashedLeft.computeLineDistances();
-      config.horizontalDashedRight.computeLineDistances();
-      config.verticalSolidTop.computeLineDistances();
-      config.verticalSolidBottom.computeLineDistances();
-      config.verticalDashedTop.computeLineDistances();
-      config.verticalDashedBottom.computeLineDistances();
-
-      const hSolidLeftHitboxGeom = config.horizontalSolidLeftHitbox.geometry as LineGeometry;
-      const hSolidRightHitboxGeom = config.horizontalSolidRightHitbox.geometry as LineGeometry;
-      const vSolidTopHitboxGeom = config.verticalSolidTopHitbox.geometry as LineGeometry;
-      const vSolidBottomHitboxGeom = config.verticalSolidBottomHitbox.geometry as LineGeometry;
-      const hDashedLeftHitboxGeom = config.horizontalDashedLeftHitbox.geometry as LineGeometry;
-      const hDashedRightHitboxGeom = config.horizontalDashedRightHitbox.geometry as LineGeometry;
-      const vDashedTopHitboxGeom = config.verticalDashedTopHitbox.geometry as LineGeometry;
-      const vDashedBottomHitboxGeom = config.verticalDashedBottomHitbox.geometry as LineGeometry;
-
-      hSolidLeftHitboxGeom.setPositions([hSolidLeftStart_x, hSolidLeftStart_y, 0, hSolidLeftEnd_x, hSolidLeftEnd_y, 0]);
-      hSolidRightHitboxGeom.setPositions([hSolidRightStart_x, hSolidRightStart_y, 0, hSolidRightEnd_x, hSolidRightEnd_y, 0]);
-      vSolidTopHitboxGeom.setPositions([vSolidTopStart_x, vSolidTopStart_y, 0, vSolidTopEnd_x, vSolidTopEnd_y, 0]);
-      vSolidBottomHitboxGeom.setPositions([vSolidBottomStart_x, vSolidBottomStart_y, 0, vSolidBottomEnd_x, vSolidBottomEnd_y, 0]);
-      hDashedLeftHitboxGeom.setPositions([hDashedLeftStart_x, hDashedLeftStart_y, 0, hDashedLeftEnd_x, hDashedLeftEnd_y, 0]);
-      hDashedRightHitboxGeom.setPositions([hDashedRightStart_x, hDashedRightStart_y, 0, hDashedRightEnd_x, hDashedRightEnd_y, 0]);
-      vDashedTopHitboxGeom.setPositions([vDashedTopStart_x, vDashedTopStart_y, 0, vDashedTopEnd_x, vDashedTopEnd_y, 0]);
-      vDashedBottomHitboxGeom.setPositions([
-        vDashedBottomStart_x,
-        vDashedBottomStart_y,
+      // 更新热区线段
+      (config.horizontalSolidLeftHitbox.geometry as LineGeometry).setPositions([hLeft, 0, 0, hDashedLeftStart, 0, 0]);
+      (config.horizontalSolidRightHitbox.geometry as LineGeometry).setPositions([hDashedRightEnd, 0, 0, hRight, 0, 0]);
+      (config.horizontalDashedLeftHitbox.geometry as LineGeometry).setPositions([hDashedLeftStart, 0, 0, hDashedLeftEnd, 0, 0]);
+      (config.horizontalDashedRightHitbox.geometry as LineGeometry).setPositions([
+        hDashedRightStart,
         0,
-        vDashedBottomEnd_x,
-        vDashedBottomEnd_y,
+        0,
+        hDashedRightEnd,
+        0,
+        0,
+      ]);
+      (config.verticalSolidTopHitbox.geometry as LineGeometry).setPositions([0, vDashedTopStart, 0, 0, vTop, 0]);
+      (config.verticalSolidBottomHitbox.geometry as LineGeometry).setPositions([0, vBottom, 0, 0, vDashedBottomEnd, 0]);
+      (config.verticalDashedTopHitbox.geometry as LineGeometry).setPositions([0, vDashedTopEnd, 0, 0, vDashedTopStart, 0]);
+      (config.verticalDashedBottomHitbox.geometry as LineGeometry).setPositions([
+        0,
+        vDashedBottomStart,
+        0,
+        0,
+        vDashedBottomEnd,
         0,
       ]);
 
-      config.horizontalSolidLeftHitbox.computeLineDistances();
-      config.horizontalSolidRightHitbox.computeLineDistances();
-      config.verticalSolidTopHitbox.computeLineDistances();
-      config.verticalSolidBottomHitbox.computeLineDistances();
-      config.horizontalDashedLeftHitbox.computeLineDistances();
-      config.horizontalDashedRightHitbox.computeLineDistances();
-      config.verticalDashedTopHitbox.computeLineDistances();
-      config.verticalDashedBottomHitbox.computeLineDistances();
-      config.centerHitbox.position.set(xPixel, correctedY, 0);
+      // 3. 重新计算线段距离 (Fat Lines 需要)
+      config.scene.children.forEach(child => {
+        if (child instanceof Group) {
+          child.children.forEach(line => {
+            if (line instanceof Line2) {
+              line.computeLineDistances();
+            }
+          });
+        }
+      });
+      // 4. 中心热区位置现在是 (0,0,0) 相对于 Group，所以不需要更新
+      // config.centerHitbox.position.set(xPixel, correctedY, 0);
     });
   }
 }
