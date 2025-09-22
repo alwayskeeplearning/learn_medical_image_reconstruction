@@ -20,6 +20,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 type TCrossConfig = {
   name: 'Axial' | 'Sagittal' | 'Coronal';
   element: HTMLElement;
+  planePixelSize: Vector2;
   rect: DOMRect;
   dragStartMatrix: Matrix4;
   matrix: Matrix4;
@@ -68,14 +69,20 @@ export class CrossLine {
   private axialElement: HTMLElement;
   private coronalElement: HTMLElement;
   private sagittalElement: HTMLElement;
-  private crossConfigs: TCrossConfig[];
+  crossConfigs: TCrossConfig[];
   private raycaster: Raycaster;
   private isDragging: boolean;
   private dragMode: TDragMode;
   private dragStartPosition: Vector2;
   private rotationCenter: Vector2 = new Vector2();
+  onChange: (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: Matrix4) => void;
 
-  constructor(axialElement: HTMLElement, coronalElement: HTMLElement, sagittalElement: HTMLElement) {
+  constructor(
+    axialElement: HTMLElement,
+    coronalElement: HTMLElement,
+    sagittalElement: HTMLElement,
+    onChange: (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: Matrix4) => void,
+  ) {
     this.axialElement = axialElement;
     this.coronalElement = coronalElement;
     this.sagittalElement = sagittalElement;
@@ -84,18 +91,21 @@ export class CrossLine {
     this.isDragging = false;
     this.dragMode = 'none';
     this.dragStartPosition = new Vector2();
+    this.onChange = onChange;
     this.init();
     this.attachEvent();
     this.animate();
   }
+  callback() {}
   animate() {
     requestAnimationFrame(this.animate.bind(this));
     this.crossConfigs.forEach(config => {
+      if (config.planePixelSize.x === 0 || config.planePixelSize.y === 0) return;
       const { renderer, scene, camera } = config;
-      // renderer.autoClear = false;
+      renderer.autoClear = false;
       // renderer.clear();
       // renderer.render(scene, camera);
-      // renderer.clearDepth();
+      renderer.clearDepth();
       renderer.render(scene, camera);
     });
   }
@@ -165,6 +175,7 @@ export class CrossLine {
       const rotationMatrix = new Matrix4().makeRotationZ(-rotationAngle);
       // 正确的顺序是 M_new = M_start * R_delta，这代表在本地坐标系下进行旋转。
       config.matrix.multiplyMatrices(config.dragStartMatrix, rotationMatrix);
+      this.onChange('rotate', config.name, config.matrix.clone());
     } else {
       const mouseCurrent = new Vector2(e.clientX, e.clientY);
       const mouseDelta = new Vector2().subVectors(mouseCurrent, this.dragStartPosition);
@@ -199,7 +210,7 @@ export class CrossLine {
     return mouseDelta.dot(normalVector);
   }
   // 获取投影长度
-  getTotalProjectedLength(matrix: Matrix4, axis: 'x' | 'y', rect: DOMRect) {
+  getTotalProjectedLength(matrix: Matrix4, axis: 'x' | 'y', planePixelSize: Vector2) {
     // 从矩阵中获取旋转角度 theta
     const theta = new Euler().setFromRotationMatrix(matrix).z;
 
@@ -214,8 +225,8 @@ export class CrossLine {
     }
 
     // 应用公式
-    const w = rect.width;
-    const h = rect.height;
+    const w = planePixelSize.x;
+    const h = planePixelSize.y;
     const totalLength = w * Math.abs(Math.cos(alpha)) + h * Math.abs(Math.sin(alpha));
 
     return totalLength;
@@ -228,8 +239,8 @@ export class CrossLine {
     targetAxis: 'x' | 'y',
     localDelta: number,
   ) {
-    const sourceTotalLength = this.getTotalProjectedLength(sourceConfig.dragStartMatrix, sourceAxis, sourceConfig.rect);
-    const targetTotalLength = this.getTotalProjectedLength(targetConfig.dragStartMatrix, targetAxis, targetConfig.rect);
+    const sourceTotalLength = this.getTotalProjectedLength(sourceConfig.dragStartMatrix, sourceAxis, sourceConfig.planePixelSize);
+    const targetTotalLength = this.getTotalProjectedLength(targetConfig.dragStartMatrix, targetAxis, targetConfig.planePixelSize);
     const deltaRatio = localDelta / sourceTotalLength;
     const targetPixelDelta = deltaRatio * targetTotalLength;
     return targetPixelDelta;
@@ -430,6 +441,7 @@ export class CrossLine {
   }
   createConfig(element: HTMLElement, name: 'Axial' | 'Sagittal' | 'Coronal') {
     const rect = element.getBoundingClientRect();
+    const planePixelSize = new Vector2();
     const dragStartMatrix = new Matrix4();
     const matrix = new Matrix4().makeTranslation(rect.width / 2, rect.height - rect.height / 2, 0);
     let horizontalColor: TColors = COLORS.CORONAL;
@@ -495,11 +507,11 @@ export class CrossLine {
       centerHitbox,
     );
     scene.add(crosshairGroup);
-    console.log(matrix);
 
     const config: TCrossConfig = {
       name,
       element,
+      planePixelSize,
       rect,
       dragStartMatrix,
       matrix,

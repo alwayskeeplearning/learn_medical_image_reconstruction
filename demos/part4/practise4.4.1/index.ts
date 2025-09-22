@@ -1,6 +1,8 @@
 import { MPRViewer } from './mpr-viewer';
 import { loadDicomSeries } from './loader';
 import { GUI } from 'dat.gui';
+import { CrossLine } from './cross-line';
+import { Euler, Matrix4, Vector2 } from 'three';
 
 const guiState = {
   windowWidth: 1200,
@@ -10,6 +12,7 @@ const guiState = {
   sagittalOffset: 0,
 };
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const setupGui = (
   viewer: MPRViewer,
   windowWidth: number,
@@ -56,17 +59,49 @@ const setupGui = (
     });
 };
 
+const lastAngles = {
+  Axial: 0,
+  Coronal: 0,
+  Sagittal: 0,
+};
+
 document.addEventListener('DOMContentLoaded', async () => {
   const axialElement = document.getElementById('axial-view') as HTMLElement;
   const coronalElement = document.getElementById('coronal-view') as HTMLElement;
   const sagittalElement = document.getElementById('sagittal-view') as HTMLElement;
-  const viewer = new MPRViewer(axialElement, coronalElement, sagittalElement);
+  let crossLine: CrossLine | null = null;
+  const onResize = (name: 'Axial' | 'Sagittal' | 'Coronal', pixelSize: Vector2) => {
+    Promise.resolve().then(() => {
+      const config = crossLine!.crossConfigs.find(c => c.name === name)!;
+      config.planePixelSize = pixelSize;
+    });
+    console.log('xxx', name, pixelSize);
+  };
+  const viewer = new MPRViewer(axialElement, coronalElement, sagittalElement, onResize);
   const { texture, metaData } = await loadDicomSeries();
   if (!texture) {
     return;
   }
   console.log('metaData', metaData);
   (window as any).viewer = viewer;
-  const { axialCount, coronalCount, sagittalCount } = viewer.init(texture, metaData);
-  setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialCount, coronalCount, sagittalCount);
+  viewer.init(texture, metaData);
+  // setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialCount, coronalCount, sagittalCount);
+  const onChange = (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', matrix: Matrix4) => {
+    if (action === 'rotate') {
+      const currentAngle = new Euler().setFromRotationMatrix(matrix).z;
+      const deltaAngle = currentAngle - lastAngles[name];
+      if (name === 'Axial') {
+        viewer.rotateView('Coronal', 'y', deltaAngle);
+        viewer.rotateView('Sagittal', 'y', deltaAngle);
+      } else if (name === 'Coronal') {
+        viewer.rotateView('Axial', 'y', -deltaAngle);
+        viewer.rotateView('Sagittal', 'x', deltaAngle);
+      } else if (name === 'Sagittal') {
+        viewer.rotateView('Axial', 'x', -deltaAngle);
+        viewer.rotateView('Coronal', 'x', -deltaAngle);
+      }
+      lastAngles[name] = currentAngle;
+    }
+  };
+  crossLine = new CrossLine(axialElement, coronalElement, sagittalElement, onChange);
 });
