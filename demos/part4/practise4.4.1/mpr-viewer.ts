@@ -38,11 +38,12 @@ type TSizeInfo = {
   size: Vector2;
   pixelSize: Vector2;
   count: number;
+  currentCount: number;
   totalThickness: number;
   samplingInterval: number;
 };
 
-type TOnResize = (name: 'Axial' | 'Sagittal' | 'Coronal', pixelSize: Vector2) => void;
+type TOnResize = (name: 'Axial' | 'Sagittal' | 'Coronal', planePixelSize: Vector2, totalCount: number) => void;
 
 class MPRViewer {
   private axialElement: HTMLElement;
@@ -163,7 +164,7 @@ class MPRViewer {
     }
 
     const material = view.mesh.material as TShaderMaterial;
-    const { uXAxis, uYAxis } = material.uniforms;
+    const { uXAxis, uYAxis, uOrigin } = material.uniforms;
 
     // 2. 确定旋转轴
     // 我们需要复制一份原始向量作为旋转轴，避免在计算过程中被修改
@@ -187,6 +188,35 @@ class MPRViewer {
     uXAxis.value.normalize();
     uYAxis.value.normalize();
     view.normal.normalize();
+    let sliceInfo = null;
+    const distance = new Vector3().subVectors(uOrigin.value, this.centerPatient).dot(view.normal);
+    if (view.name === 'Coronal') {
+      this.coronalSliceInfo = this.calculateSliceInfoForDirection(1);
+      const startCount = this.coronalSliceInfo.currentCount;
+      const count = distance / this.coronalSliceInfo.samplingInterval;
+      const currentCount = startCount + count;
+      this.coronalSliceInfo.currentCount = currentCount;
+      sliceInfo = this.coronalSliceInfo;
+      this.changeSlice(currentCount, 'coronal');
+    } else if (view.name === 'Sagittal') {
+      this.sagittalSliceInfo = this.calculateSliceInfoForDirection(2);
+      const startCount = this.sagittalSliceInfo.currentCount;
+      const count = distance / this.sagittalSliceInfo.samplingInterval;
+      const currentCount = startCount + count;
+      this.sagittalSliceInfo.currentCount = currentCount;
+      sliceInfo = this.sagittalSliceInfo;
+      this.changeSlice(currentCount, 'sagittal');
+    } else {
+      this.axialSliceInfo = this.calculateSliceInfoForDirection(0);
+      const startCount = this.axialSliceInfo.currentCount;
+      const count = distance / this.axialSliceInfo.samplingInterval;
+      const currentCount = startCount + count;
+      this.axialSliceInfo.currentCount = currentCount;
+      sliceInfo = this.axialSliceInfo;
+      this.changeSlice(currentCount, 'axial');
+    }
+    const planePixelSize = this.getPlanePixelSize(view);
+    this.onResize(view.name, planePixelSize, sliceInfo.count);
   }
   handleResize() {
     // 更新每个视图的相机
@@ -216,9 +246,17 @@ class MPRViewer {
       camera.top = viewHeight / 2;
       camera.bottom = -viewHeight / 2;
       camera.updateProjectionMatrix();
-      const pixelSize = this.getPlanePixelSize(view);
-      this.onResize(view.name, pixelSize);
-      console.log(`${view.name} 平面的像素尺寸:`, pixelSize);
+      const planePixelSize = this.getPlanePixelSize(view);
+      let totalCount = 0;
+      if (view.name === 'Axial') {
+        totalCount = this.axialSliceInfo.count;
+      } else if (view.name === 'Coronal') {
+        totalCount = this.coronalSliceInfo.count;
+      } else if (view.name === 'Sagittal') {
+        totalCount = this.sagittalSliceInfo.count;
+      }
+      this.onResize(view.name, planePixelSize, totalCount);
+      console.log(`${view.name} 平面的像素尺寸:`, totalCount, planePixelSize);
     });
   }
   getPlanePixelSize(view: TViewConfig) {
@@ -341,10 +379,15 @@ class MPRViewer {
       side: DoubleSide,
     });
     this.initViewConfig(material, physicalSize);
-    this.handleResize();
     this.axialSliceInfo = this.calculateSliceInfoForDirection(0);
     this.coronalSliceInfo = this.calculateSliceInfoForDirection(1);
     this.sagittalSliceInfo = this.calculateSliceInfoForDirection(2);
+    this.handleResize();
+    return {
+      axialCount: this.axialSliceInfo.count,
+      coronalCount: this.coronalSliceInfo.count,
+      sagittalCount: this.sagittalSliceInfo.count,
+    };
   }
   setWWWC(windowWidth: number, windowCenter: number) {
     const axialMaterial = this.viewConfigs[0].mesh.material as TShaderMaterial;
@@ -382,7 +425,21 @@ class MPRViewer {
     const i = index - 1 - (count - 1) / 2;
 
     tempOrigin.copy(this.centerPatient).add(normal.multiplyScalar(i * samplingInterval));
+
     material?.uniforms.uOrigin.value.copy(tempOrigin);
+  }
+  changeSliceDelta(delta: number, orientation: string) {
+    if (orientation === 'sagittal') {
+      this.sagittalSliceInfo.currentCount += delta;
+      this.changeSlice(this.sagittalSliceInfo.currentCount, 'sagittal');
+    } else if (orientation === 'coronal') {
+      this.coronalSliceInfo.currentCount += delta;
+      this.changeSlice(this.coronalSliceInfo.currentCount, 'coronal');
+    } else {
+      this.axialSliceInfo.currentCount += delta;
+
+      this.changeSlice(this.axialSliceInfo.currentCount, 'axial');
+    }
   }
 }
 

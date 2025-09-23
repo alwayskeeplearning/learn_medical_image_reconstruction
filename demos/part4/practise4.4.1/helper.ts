@@ -125,6 +125,7 @@ const calculateSliceInfoForDirection = (
     size,
     pixelSize,
     count,
+    currentCount: (count + 1) / 2,
     totalThickness,
     samplingInterval,
   };

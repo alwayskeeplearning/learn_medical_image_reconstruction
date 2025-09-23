@@ -20,6 +20,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 type TCrossConfig = {
   name: 'Axial' | 'Sagittal' | 'Coronal';
   element: HTMLElement;
+  totalCount: number;
   planePixelSize: Vector2;
   rect: DOMRect;
   dragStartMatrix: Matrix4;
@@ -59,7 +60,7 @@ type TColors = (typeof COLORS)[keyof typeof COLORS];
 
 const CENTER_GAP_SIZE = 32;
 const DASH_ZONE_SIZE = 128;
-const HOT_ZONE_PADDING = 8;
+const HOT_ZONE_PADDING = 10;
 const LINE_WIDTH = 2;
 const DASH_SIZE = 6;
 const GAP_SIZE = 6;
@@ -75,13 +76,13 @@ export class CrossLine {
   private dragMode: TDragMode;
   private dragStartPosition: Vector2;
   private rotationCenter: Vector2 = new Vector2();
-  onChange: (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: Matrix4) => void;
+  onChange: (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: any) => void;
 
   constructor(
     axialElement: HTMLElement,
     coronalElement: HTMLElement,
     sagittalElement: HTMLElement,
-    onChange: (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: Matrix4) => void,
+    onChange: (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: any) => void,
   ) {
     this.axialElement = axialElement;
     this.coronalElement = coronalElement;
@@ -175,7 +176,7 @@ export class CrossLine {
       const rotationMatrix = new Matrix4().makeRotationZ(-rotationAngle);
       // 正确的顺序是 M_new = M_start * R_delta，这代表在本地坐标系下进行旋转。
       config.matrix.multiplyMatrices(config.dragStartMatrix, rotationMatrix);
-      this.onChange('rotate', config.name, config.matrix.clone());
+      this.onChange('rotate', config.name, rotationAngle);
     } else {
       const mouseCurrent = new Vector2(e.clientX, e.clientY);
       const mouseDelta = new Vector2().subVectors(mouseCurrent, this.dragStartPosition);
@@ -245,6 +246,11 @@ export class CrossLine {
     const targetPixelDelta = deltaRatio * targetTotalLength;
     return targetPixelDelta;
   }
+  getRatio(sourceConfig: TCrossConfig, targetConfig: TCrossConfig, targetAxis: 'x' | 'y') {
+    const targetTotalLength = this.getTotalProjectedLength(targetConfig.dragStartMatrix, targetAxis, targetConfig.planePixelSize);
+    const ratio = sourceConfig.totalCount / targetTotalLength;
+    return ratio;
+  }
   // 应用局部位移
   applyLocalTranslation(config: TCrossConfig, axis: 'x' | 'y', distance: number) {
     const translationMatrix = this.translateOnLocalAxis(config.dragStartMatrix, axis, distance);
@@ -265,17 +271,25 @@ export class CrossLine {
           const localDeltaX = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'x', mouseDelta);
           const targetPixelDeltaX = this.convertDeltaByRatio(axialConfig, coronalConfig, 'x', 'x', localDeltaX);
           this.applyLocalTranslation(coronalConfig, 'x', targetPixelDeltaX);
+          const ratioX = this.getRatio(sagittalConfig, axialConfig, 'x');
+          const ratioY = this.getRatio(coronalConfig, axialConfig, 'y');
+          this.onChange('translate', 'Axial', { x: localDeltaX * ratioX, y: localDeltaY * ratioY });
         } else if (dragMode === 'horizontal') {
           const localDeltaY = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'y', mouseDelta);
           this.applyLocalTranslation(axialConfig, 'y', -localDeltaY);
           const targetPixelDeltaY = this.convertDeltaByRatio(axialConfig, sagittalConfig, 'y', 'x', localDeltaY);
           this.applyLocalTranslation(sagittalConfig, 'x', targetPixelDeltaY);
+          const ratioY = this.getRatio(coronalConfig, axialConfig, 'y');
+          this.onChange('translate', 'Axial', { x: 0, y: localDeltaY * ratioY });
         } else if (dragMode === 'vertical') {
           const localDeltaX = this.getDragDeltaInLocalSpace(axialConfig.dragStartMatrix, 'x', mouseDelta);
           this.applyLocalTranslation(axialConfig, 'x', localDeltaX);
           const targetPixelDeltaX = this.convertDeltaByRatio(axialConfig, coronalConfig, 'x', 'x', localDeltaX);
           this.applyLocalTranslation(coronalConfig, 'x', targetPixelDeltaX);
+          const ratioX = this.getRatio(sagittalConfig, axialConfig, 'x');
+          this.onChange('translate', 'Axial', { x: localDeltaX * ratioX, y: 0 });
         }
+
         break;
       case 'Coronal':
         if (dragMode === 'center') {
@@ -287,16 +301,23 @@ export class CrossLine {
           const localDeltaX = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'x', mouseDelta);
           const targetPixelDeltaX = this.convertDeltaByRatio(coronalConfig, axialConfig, 'x', 'x', localDeltaX);
           this.applyLocalTranslation(axialConfig, 'x', targetPixelDeltaX);
+          const ratioX = this.getRatio(sagittalConfig, coronalConfig, 'x');
+          const ratioY = this.getRatio(axialConfig, coronalConfig, 'y');
+          this.onChange('translate', 'Coronal', { x: localDeltaX * ratioX, y: localDeltaY * ratioY });
         } else if (dragMode === 'horizontal') {
           const localDeltaY = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'y', mouseDelta);
           this.applyLocalTranslation(coronalConfig, 'y', -localDeltaY);
           const targetPixelDeltaY = this.convertDeltaByRatio(coronalConfig, sagittalConfig, 'y', 'y', localDeltaY);
           this.applyLocalTranslation(sagittalConfig, 'y', -targetPixelDeltaY);
+          const ratioY = this.getRatio(axialConfig, coronalConfig, 'y');
+          this.onChange('translate', 'Coronal', { x: 0, y: localDeltaY * ratioY });
         } else if (dragMode === 'vertical') {
           const localDeltaX = this.getDragDeltaInLocalSpace(coronalConfig.dragStartMatrix, 'x', mouseDelta);
           this.applyLocalTranslation(coronalConfig, 'x', localDeltaX);
           const targetPixelDeltaX = this.convertDeltaByRatio(coronalConfig, axialConfig, 'x', 'x', localDeltaX);
           this.applyLocalTranslation(axialConfig, 'x', targetPixelDeltaX);
+          const ratioX = this.getRatio(sagittalConfig, coronalConfig, 'x');
+          this.onChange('translate', 'Coronal', { x: localDeltaX * ratioX, y: 0 });
         }
         break;
       case 'Sagittal':
@@ -309,16 +330,23 @@ export class CrossLine {
           const localDeltaX = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'x', mouseDelta);
           const targetPixelDeltaX = this.convertDeltaByRatio(sagittalConfig, axialConfig, 'x', 'y', localDeltaX);
           this.applyLocalTranslation(axialConfig, 'y', -targetPixelDeltaX);
+          const ratioX = this.getRatio(coronalConfig, sagittalConfig, 'x');
+          const ratioY = this.getRatio(axialConfig, sagittalConfig, 'y');
+          this.onChange('translate', 'Sagittal', { x: localDeltaX * ratioX, y: localDeltaY * ratioY });
         } else if (dragMode === 'horizontal') {
           const localDeltaY = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'y', mouseDelta);
           this.applyLocalTranslation(sagittalConfig, 'y', -localDeltaY);
           const targetPixelDeltaY = this.convertDeltaByRatio(sagittalConfig, coronalConfig, 'y', 'y', localDeltaY);
           this.applyLocalTranslation(coronalConfig, 'y', -targetPixelDeltaY);
+          const ratioY = this.getRatio(axialConfig, sagittalConfig, 'y');
+          this.onChange('translate', 'Sagittal', { x: 0, y: localDeltaY * ratioY });
         } else if (dragMode === 'vertical') {
           const localDeltaX = this.getDragDeltaInLocalSpace(sagittalConfig.dragStartMatrix, 'x', mouseDelta);
           this.applyLocalTranslation(sagittalConfig, 'x', localDeltaX);
           const targetPixelDeltaX = this.convertDeltaByRatio(sagittalConfig, axialConfig, 'x', 'y', localDeltaX);
           this.applyLocalTranslation(axialConfig, 'y', -targetPixelDeltaX);
+          const ratioX = this.getRatio(coronalConfig, sagittalConfig, 'x');
+          this.onChange('translate', 'Sagittal', { x: localDeltaX * ratioX, y: 0 });
         }
         break;
     }
@@ -441,6 +469,7 @@ export class CrossLine {
   }
   createConfig(element: HTMLElement, name: 'Axial' | 'Sagittal' | 'Coronal') {
     const rect = element.getBoundingClientRect();
+    const totalCount = 0;
     const planePixelSize = new Vector2();
     const dragStartMatrix = new Matrix4();
     const matrix = new Matrix4().makeTranslation(rect.width / 2, rect.height - rect.height / 2, 0);
@@ -511,6 +540,7 @@ export class CrossLine {
     const config: TCrossConfig = {
       name,
       element,
+      totalCount,
       planePixelSize,
       rect,
       dragStartMatrix,
