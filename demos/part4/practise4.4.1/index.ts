@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   console.log('metaData', metaData);
   (window as any).viewer = viewer;
-  const { axialCount, coronalCount, sagittalCount } = viewer.init(texture, metaData);
+  viewer.init(texture, metaData);
   // setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialCount, coronalCount, sagittalCount);
   const onChange = (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: any) => {
     if (action === 'rotate') {

@@ -176,6 +176,7 @@ export class CrossLine {
       const rotationMatrix = new Matrix4().makeRotationZ(-rotationAngle);
       // 正确的顺序是 M_new = M_start * R_delta，这代表在本地坐标系下进行旋转。
       config.matrix.multiplyMatrices(config.dragStartMatrix, rotationMatrix);
+
       this.onChange('rotate', config.name, rotationAngle);
     } else {
       const mouseCurrent = new Vector2(e.clientX, e.clientY);

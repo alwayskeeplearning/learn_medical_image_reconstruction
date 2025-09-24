@@ -31,6 +31,7 @@ type TViewConfig = {
   camera: TOrthographicCamera;
   mesh: TMesh;
   normal: Vector3;
+  initNormal: Vector3;
   renderer: TWebGLRenderer;
 };
 
@@ -94,6 +95,7 @@ class MPRViewer {
       camera: axialCamera,
       mesh: axialPlane,
       normal: new Vector3(0, 0, 1),
+      initNormal: new Vector3(0, 0, 1),
       renderer: axialRenderer,
     };
 
@@ -119,6 +121,7 @@ class MPRViewer {
       camera: coronalCamera,
       mesh: coronalPlane,
       normal: new Vector3(0, 1, 0),
+      initNormal: new Vector3(0, 1, 0),
       renderer: coronalRenderer,
     };
     const sagittalCamera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1);
@@ -143,6 +146,7 @@ class MPRViewer {
       camera: sagittalCamera,
       mesh: sagittalPlane,
       normal: new Vector3(1, 0, 0),
+      initNormal: new Vector3(1, 0, 0),
       renderer: sagittalRenderer,
     };
 
@@ -165,7 +169,17 @@ class MPRViewer {
 
     const material = view.mesh.material as TShaderMaterial;
     const { uXAxis, uYAxis, uOrigin } = material.uniforms;
-
+    // let matrix4 = new Matrix4();
+    // if (orientation === 'Axial') {
+    //   const coronalConfig = this.viewConfigs.find(v => v.name === 'Coronal')!;
+    //   const normal = coronalConfig.normal;
+    //   const initNormal = coronalConfig.initNormal;
+    //   const angleInRadians = normal.angleTo(initNormal);
+    //   matrix4 = new Matrix4().makeRotationAxis(normal, angleInRadians);
+    //   uXAxis.value.applyMatrix4(matrix4);
+    //   uYAxis.value.applyMatrix4(matrix4);
+    // } else if (orientation === 'Coronal') {
+    // }
     // 2. 确定旋转轴
     // 我们需要复制一份原始向量作为旋转轴，避免在计算过程中被修改
     const rotationAxis = new Vector3();
