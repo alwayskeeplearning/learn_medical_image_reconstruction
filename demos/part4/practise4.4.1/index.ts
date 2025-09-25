@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const tiltAngle = new Euler().setFromRotationMatrix(axialMatrix!).z;
         viewer.rotateView('Axial', 'y', -tiltAngle, deltaAngle);
         const tiltAngle2 = new Euler().setFromRotationMatrix(sagittalMatrix!).z;
-        viewer.rotateView('Sagittal', 'x', -tiltAngle2, -deltaAngle);
+        viewer.rotateView('Sagittal', 'x', tiltAngle2, -deltaAngle);
       } else if (name === 'Sagittal') {
         const tiltAngle = new Euler().setFromRotationMatrix(axialMatrix!).z;
         viewer.rotateView('Axial', 'x', -tiltAngle, deltaAngle);
