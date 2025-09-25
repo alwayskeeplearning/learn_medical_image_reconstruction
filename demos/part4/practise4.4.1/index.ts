@@ -3,7 +3,7 @@ import { MPRViewer } from './mpr-viewer';
 import { loadDicomSeries } from './loader';
 import { GUI } from 'dat.gui';
 import { CrossLine } from './cross-line';
-import { Vector2 } from 'three';
+import { Euler, Vector2 } from 'three';
 
 const guiState = {
   windowWidth: 1200,
@@ -103,15 +103,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (action === 'rotate') {
       const currentAngle = value;
       const deltaAngle = currentAngle - lastAngles[name];
+      const axialMatrix = crossLine?.crossConfigs.find(c => c.name === 'Axial')?.matrix;
+      const coronalMatrix = crossLine?.crossConfigs.find(c => c.name === 'Coronal')?.matrix;
+      const sagittalMatrix = crossLine?.crossConfigs.find(c => c.name === 'Sagittal')?.matrix;
       if (name === 'Axial') {
-        viewer.rotateView('Coronal', 'y', -deltaAngle);
-        viewer.rotateView('Sagittal', 'y', -deltaAngle);
+        const tiltAngle = new Euler().setFromRotationMatrix(coronalMatrix!).z;
+        viewer.rotateView('Coronal', 'y', tiltAngle, -deltaAngle);
+        const tiltAngle2 = new Euler().setFromRotationMatrix(sagittalMatrix!).z;
+        viewer.rotateView('Sagittal', 'y', -tiltAngle2, -deltaAngle);
       } else if (name === 'Coronal') {
-        viewer.rotateView('Axial', 'y', deltaAngle);
-        viewer.rotateView('Sagittal', 'x', -deltaAngle);
+        const tiltAngle = new Euler().setFromRotationMatrix(axialMatrix!).z;
+        viewer.rotateView('Axial', 'y', -tiltAngle, deltaAngle);
+        const tiltAngle2 = new Euler().setFromRotationMatrix(sagittalMatrix!).z;
+        viewer.rotateView('Sagittal', 'x', -tiltAngle2, -deltaAngle);
       } else if (name === 'Sagittal') {
-        viewer.rotateView('Axial', 'x', deltaAngle);
-        viewer.rotateView('Coronal', 'x', deltaAngle);
+        const tiltAngle = new Euler().setFromRotationMatrix(axialMatrix!).z;
+        viewer.rotateView('Axial', 'x', -tiltAngle, deltaAngle);
+        const tiltAngle2 = new Euler().setFromRotationMatrix(coronalMatrix!).z;
+        viewer.rotateView('Coronal', 'x', tiltAngle2, deltaAngle);
       }
       lastAngles[name] = currentAngle;
     } else {

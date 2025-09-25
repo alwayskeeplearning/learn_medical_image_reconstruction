@@ -159,7 +159,7 @@ class MPRViewer {
       renderer.render(scene, camera);
     });
   }
-  rotateView(orientation: 'Axial' | 'Sagittal' | 'Coronal', axis: 'x' | 'y', radian: number) {
+  rotateView(orientation: 'Axial' | 'Sagittal' | 'Coronal', axis: 'x' | 'y', tiltAngle: number, radian: number) {
     // 1. 找到对应的视图配置
     const view = this.viewConfigs.find(v => v.name === orientation);
     if (!view) {
@@ -169,17 +169,7 @@ class MPRViewer {
 
     const material = view.mesh.material as TShaderMaterial;
     const { uXAxis, uYAxis, uOrigin } = material.uniforms;
-    // let matrix4 = new Matrix4();
-    // if (orientation === 'Axial') {
-    //   const coronalConfig = this.viewConfigs.find(v => v.name === 'Coronal')!;
-    //   const normal = coronalConfig.normal;
-    //   const initNormal = coronalConfig.initNormal;
-    //   const angleInRadians = normal.angleTo(initNormal);
-    //   matrix4 = new Matrix4().makeRotationAxis(normal, angleInRadians);
-    //   uXAxis.value.applyMatrix4(matrix4);
-    //   uYAxis.value.applyMatrix4(matrix4);
-    // } else if (orientation === 'Coronal') {
-    // }
+
     // 2. 确定旋转轴
     // 我们需要复制一份原始向量作为旋转轴，避免在计算过程中被修改
     const rotationAxis = new Vector3();
@@ -189,9 +179,16 @@ class MPRViewer {
       rotationAxis.copy(uYAxis.value);
     }
 
+    const tiltMatrix = new Matrix4();
+    const tiltAroundAxis = view.normal;
+
+    tiltMatrix.makeRotationAxis(tiltAroundAxis, tiltAngle);
+
+    // 3. 将“倾斜”变换应用到“基础轴”上，得到最终的自定义旋转轴
+    const customRotationAxis = rotationAxis.clone().applyMatrix4(tiltMatrix);
     // 3. 创建旋转矩阵
     const rotationMatrix = new Matrix4();
-    rotationMatrix.makeRotationAxis(rotationAxis.normalize(), radian);
+    rotationMatrix.makeRotationAxis(customRotationAxis.normalize(), radian);
 
     // 4. 应用旋转到 uXAxis, uYAxis 和 normal
     uXAxis.value.applyMatrix4(rotationMatrix);
