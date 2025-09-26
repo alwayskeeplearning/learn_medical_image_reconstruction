@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>步骤 4.5.0 (准备): 三视图正交MPR</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #1a1a1a;
+        color: #fff;
+        font-family: sans-serif;
+      }
+      #mpr-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+        width: 100vw;
+        height: 100vh;
+        gap: 2px;
+        background-color: #333;
+      }
+      .view {
+        position: relative;
+        background-color: #000;
+        overflow: hidden; /* 确保 canvas 不会溢出 */
+      }
+      /* 让轴位视图占据左侧所有行 */
+      #axial-view {
+        grid-column: 1 / 2;
+        grid-row: 1 / 3;
+      }
+      /* 冠状位在右上角 */
+      #coronal-view {
+        grid-column: 2 / 3;
+        grid-row: 1 / 2;
+      }
+      /* 矢状位在右下角 */
+      #sagittal-view {
+        grid-column: 2 / 3;
+        grid-row: 2 / 3;
+      }
+      .view-label {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: #fff;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 14px;
+        pointer-events: none; /* 标签不干扰鼠标事件 */
+      }
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div id="mpr-container">
+        <div id="axial-view" class="view">
+          <div class="view-label">轴位 (Axial)</div>
+        </div>
+        <input type="range" id="axial-slice-slider" class="slice-slider" />
+        <input type="range" id="axial-mip-thickness-slider" class="slice-slider" title="MIP 厚度" />
+        <div id="sagittal-view" class="view"></div>
+        <input type="range" id="sagittal-slice-slider" class="slice-slider" />
+      </div>
+      <div class="view-container">
+        <div id="coronal-view" class="view"></div>
+        <input type="range" id="coronal-slice-slider" class="slice-slider" />
+      </div>
+    </div>
+  </body>
+</html>

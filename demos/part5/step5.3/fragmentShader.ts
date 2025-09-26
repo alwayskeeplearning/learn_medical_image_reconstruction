@@ -33,6 +33,7 @@ const fragmentShader = `
     
     vec3 sampleCoord = (voxelPos + vec3(0.5)) / uTextureSize;
     float intensity = 0.0;
+
     if (u_slabThickness > 0.0) {
       vec3 rayDir = normalize(cross(uXAxis, uYAxis));
       
