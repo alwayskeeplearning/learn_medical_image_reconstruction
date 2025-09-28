@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   axialMipThicknessSlider.addEventListener('input', () => {
     const thickness = parseFloat(axialMipThicknessSlider.value);
-    viewer.setSlabThickness(thickness, 'axial');
+    viewer.setMIPThickness(thickness);
   });
 
   axialSliceSlider.addEventListener('input', () => {

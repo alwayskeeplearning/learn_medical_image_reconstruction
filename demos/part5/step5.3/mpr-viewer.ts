@@ -79,6 +79,8 @@ class MPRViewer {
     axialMaterial.uniforms.uYAxis.value.set(0, -1, 0);
     axialMaterial.uniforms.uPlaneWidth.value = physicalSize.x;
     axialMaterial.uniforms.uPlaneHeight.value = physicalSize.y;
+    axialMaterial.uniforms.uSamplingInterval.value = 0.0;
+    axialMaterial.uniforms.uSampleCount.value = 0;
 
     const axialPlaneGeometry = new PlaneGeometry(physicalSize.x, physicalSize.y);
     const axialPlane = new Mesh(axialPlaneGeometry, axialMaterial);
@@ -226,6 +228,7 @@ class MPRViewer {
       sliceInfo = this.axialSliceInfo;
       this.changeSlice(currentCount, 'axial');
     }
+
     const planePixelSize = this.getPlanePixelSize(view);
     this.onResize(view.name, planePixelSize, sliceInfo.count);
   }
@@ -386,8 +389,8 @@ class MPRViewer {
         uPlaneWidth: { value: 0 },
         uPlaneHeight: { value: 0 },
         uPatientToVoxelMatrix: { value: this.patientToVoxelMatrix },
-        u_slabThickness: { value: 0.0 }, // 这个值将直接以毫米为单位
-        u_samples: { value: 128 },
+        uSamplingInterval: { value: 0.0 },
+        uSampleCount: { value: 0 },
       },
       side: DoubleSide,
     });
@@ -413,12 +416,19 @@ class MPRViewer {
     sagittalMaterial.uniforms.uWindowWidth.value = windowWidth;
     sagittalMaterial.uniforms.uWindowCenter.value = windowCenter;
   }
-  setSlabThickness(thickness: number, viewName: 'axial' | 'coronal' | 'sagittal') {
-    const view = this.viewConfigs.find(v => v.name.toLowerCase() === viewName);
+  setMIPThickness(thickness: number) {
+    const view = this.viewConfigs.find(v => v.name === 'Axial');
     if (view) {
       const material = view.mesh.material as TShaderMaterial;
-      // 直接将物理单位（毫米）传给 uniform
-      material.uniforms.u_slabThickness.value = thickness;
+      const { uSamplingInterval, uSampleCount } = material.uniforms;
+
+      const sliceInfo = this.axialSliceInfo;
+      if (thickness > 0) {
+        uSamplingInterval.value = sliceInfo.samplingInterval;
+        uSampleCount.value = Math.ceil(thickness / sliceInfo.samplingInterval);
+      } else {
+        uSampleCount.value = 0;
+      }
     }
   }
   changeSlice(index: number, orientation: string) {

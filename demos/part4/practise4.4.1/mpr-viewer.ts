@@ -168,7 +168,7 @@ class MPRViewer {
     }
 
     const material = view.mesh.material as TShaderMaterial;
-    const { uXAxis, uYAxis, uOrigin } = material.uniforms;
+    const { uXAxis, uYAxis, uOrigin, uSamplingInterval, uSampleCount } = material.uniforms;
 
     // 2. 确定旋转轴
     // 我们需要复制一份原始向量作为旋转轴，避免在计算过程中被修改
@@ -226,6 +226,9 @@ class MPRViewer {
       sliceInfo = this.axialSliceInfo;
       this.changeSlice(currentCount, 'axial');
     }
+    uSamplingInterval.value = sliceInfo.samplingInterval;
+    uSampleCount.value = 50;
+
     const planePixelSize = this.getPlanePixelSize(view);
     this.onResize(view.name, planePixelSize, sliceInfo.count);
   }
@@ -386,6 +389,8 @@ class MPRViewer {
         uPlaneWidth: { value: 0 },
         uPlaneHeight: { value: 0 },
         uPatientToVoxelMatrix: { value: this.patientToVoxelMatrix },
+        uSamplingInterval: { value: 0.0 },
+        uSampleCount: { value: 0 },
       },
       side: DoubleSide,
     });
@@ -393,6 +398,15 @@ class MPRViewer {
     this.axialSliceInfo = this.calculateSliceInfoForDirection(0);
     this.coronalSliceInfo = this.calculateSliceInfoForDirection(1);
     this.sagittalSliceInfo = this.calculateSliceInfoForDirection(2);
+    (this.viewConfigs[0].mesh.material as TShaderMaterial).uniforms.uSamplingInterval.value =
+      this.axialSliceInfo.samplingInterval;
+    (this.viewConfigs[0].mesh.material as TShaderMaterial).uniforms.uSampleCount.value = 50;
+    (this.viewConfigs[1].mesh.material as TShaderMaterial).uniforms.uSamplingInterval.value =
+      this.coronalSliceInfo.samplingInterval;
+    (this.viewConfigs[1].mesh.material as TShaderMaterial).uniforms.uSampleCount.value = 50;
+    (this.viewConfigs[2].mesh.material as TShaderMaterial).uniforms.uSamplingInterval.value =
+      this.sagittalSliceInfo.samplingInterval;
+    (this.viewConfigs[2].mesh.material as TShaderMaterial).uniforms.uSampleCount.value = 50;
     this.handleResize();
     return {
       axialCount: this.axialSliceInfo.count,

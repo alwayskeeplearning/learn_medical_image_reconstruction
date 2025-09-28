@@ -12,8 +12,8 @@ const fragmentShader = `
   uniform float uPlaneWidth;
   uniform float uPlaneHeight;
   uniform mat4 uPatientToVoxelMatrix;
-  uniform float u_slabThickness;
-  uniform int u_samples;
+  uniform float uSamplingInterval;
+  uniform int uSampleCount;
 
   // 从顶点着色器传入的 UV 坐标
   in vec2 vUv;
@@ -34,12 +34,13 @@ const fragmentShader = `
     vec3 sampleCoord = (voxelPos + vec3(0.5)) / uTextureSize;
     float intensity = 0.0;
 
-    if (u_slabThickness > 0.0) {
+    if (uSampleCount > 0) {
+      float slabThickness = uSamplingInterval * float(uSampleCount);
       vec3 rayDir = normalize(cross(uXAxis, uYAxis));
       
       // 1. 在患者坐标系下计算光线起点和终点
-      vec3 startPatient = patientPos - rayDir * u_slabThickness / 2.0;
-      vec3 endPatient = patientPos + rayDir * u_slabThickness / 2.0;
+      vec3 startPatient = patientPos - rayDir * slabThickness / 2.0;
+      vec3 endPatient = patientPos + rayDir * slabThickness / 2.0;
 
       // 2. 将起点和终点转换到纹理坐标系
       vec4 startVoxel4 = uPatientToVoxelMatrix * vec4(startPatient, 1.0);
@@ -50,11 +51,11 @@ const fragmentShader = `
 
       // 3. 计算总步进向量和每一步的步长
       vec3 slabVec = endTex - startTex;
-      vec3 step = slabVec / float(u_samples - 1);
+      vec3 step = slabVec / float(uSampleCount - 1);
       
       float maxVal = -3000.0;
 
-      for (int i = 0; i < u_samples; i++) {
+      for (int i = 0; i < uSampleCount; i++) {
         vec3 coord = startTex + float(i) * step;
         if (coord.x >= 0.0 && coord.x <= 1.0 &&
             coord.y >= 0.0 && coord.y <= 1.0 &&
