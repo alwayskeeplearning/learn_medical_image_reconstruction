@@ -37,6 +37,10 @@ type TCrossConfig = {
   horizontalDashedRight: Line2;
   verticalDashedTop: Line2;
   verticalDashedBottom: Line2;
+  horizontalDashedTop: Line2;
+  horizontalDashedBottom: Line2;
+  verticalDashedLeft: Line2;
+  verticalDashedRight: Line2;
   horizontalSolidLeftHitbox: Line2;
   horizontalSolidRightHitbox: Line2;
   verticalSolidTopHitbox: Line2;
@@ -45,10 +49,32 @@ type TCrossConfig = {
   horizontalDashedRightHitbox: Line2;
   verticalDashedTopHitbox: Line2;
   verticalDashedBottomHitbox: Line2;
+  horizontalDashedTopHitbox: Line2;
+  horizontalDashedBottomHitbox: Line2;
+  verticalDashedLeftHitbox: Line2;
+  verticalDashedRightHitbox: Line2;
+  horizontalHandleTopLeft: Mesh;
+  horizontalHandleTopRight: Mesh;
+  horizontalHandleBottomLeft: Mesh;
+  horizontalHandleBottomRight: Mesh;
+  verticalHandleLeftTop: Mesh;
+  verticalHandleLeftBottom: Mesh;
+  verticalHandleRightTop: Mesh;
+  verticalHandleRightBottom: Mesh;
+  horizontalHandleTopLeftHitbox: Mesh;
+  horizontalHandleTopRightHitbox: Mesh;
+  horizontalHandleBottomLeftHitbox: Mesh;
+  horizontalHandleBottomRightHitbox: Mesh;
+  verticalHandleLeftTopHitbox: Mesh;
+  verticalHandleLeftBottomHitbox: Mesh;
+  verticalHandleRightTopHitbox: Mesh;
+  verticalHandleRightBottomHitbox: Mesh;
   centerHitbox: Mesh;
+  horizontalRange: number;
+  verticalRange: number;
 };
 
-type TDragMode = 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none';
+type TDragMode = 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' | 'horizontalHandle' | 'verticalHandle';
 
 const COLORS = {
   AXIAL: '#3f87f5',
@@ -59,6 +85,7 @@ const COLORS = {
 type TColors = (typeof COLORS)[keyof typeof COLORS];
 
 const CENTER_GAP_SIZE = 32;
+const HANDLE_BOX_SIZE = 8;
 const DASH_ZONE_SIZE = 128;
 const HOT_ZONE_PADDING = 10;
 const LINE_WIDTH = 2;
@@ -147,6 +174,8 @@ export class CrossLine {
           switch (mode) {
             case 'horizontal':
             case 'vertical':
+            case 'horizontalHandle':
+            case 'verticalHandle':
               config.element.style.cursor = 'pointer';
               break;
             case 'rotate':
@@ -181,8 +210,11 @@ export class CrossLine {
     } else {
       const mouseCurrent = new Vector2(e.clientX, e.clientY);
       const mouseDelta = new Vector2().subVectors(mouseCurrent, this.dragStartPosition);
-
-      this.syncMatrix(config.name, this.dragMode, mouseDelta);
+      if (this.dragMode === 'horizontalHandle' || this.dragMode === 'verticalHandle') {
+        this.syncRangeHandle(config, this.dragMode, mouseCurrent);
+      } else {
+        this.syncMatrix(config.name, this.dragMode, mouseDelta);
+      }
     }
     this.updateAllCrosshairs();
   }
@@ -256,6 +288,73 @@ export class CrossLine {
   applyLocalTranslation(config: TCrossConfig, axis: 'x' | 'y', distance: number) {
     const translationMatrix = this.translateOnLocalAxis(config.dragStartMatrix, axis, distance);
     config.matrix.multiplyMatrices(translationMatrix, config.dragStartMatrix);
+  }
+  syncRangeHandle(config: TCrossConfig, dragMode: TDragMode, mouseCurrent: Vector2) {
+    const axialConfig = this.crossConfigs.find(c => c.name === 'Axial')!;
+    const coronalConfig = this.crossConfigs.find(c => c.name === 'Coronal')!;
+    const sagittalConfig = this.crossConfigs.find(c => c.name === 'Sagittal')!;
+    const rangeValue = { x: -1, y: -1 };
+    if (dragMode === 'horizontalHandle') {
+      // 1. 获取十字线中心点视图坐标
+      const center = new Vector3().setFromMatrixPosition(config.matrix);
+      // 局部X轴（水平线方向）
+      const localX = new Vector3().setFromMatrixColumn(config.matrix, 0).normalize();
+
+      // 2. 计算水平线的法向量 (二维平面中, 若d=(dx, dy), 则法向量n=(-dy, dx))
+      const normal = new Vector2(-localX.y, localX.x);
+
+      // 3. 获取鼠标在视图DOM元素中的局部坐标 (原点在左下角，Y轴向上)
+      const rect = config.rect;
+      const mouseLocal = new Vector2(mouseCurrent.x - rect.left, rect.height - (mouseCurrent.y - rect.top));
+
+      // 4. 计算从中心点到鼠标的向量
+      const vecToMouse = new Vector2().subVectors(mouseLocal, new Vector2(center.x, center.y));
+
+      // 5. 将该向量投影到法向量上，得到垂直距离
+      const distance = Math.abs(vecToMouse.dot(normal));
+      // 6. 更新厚度 (距离是厚度的一半)
+      const range = distance * 2;
+      config.horizontalRange = range;
+      rangeValue.y = range;
+    } else if (dragMode === 'verticalHandle') {
+      const center = new Vector3().setFromMatrixPosition(config.matrix);
+      const localY = new Vector3().setFromMatrixColumn(config.matrix, 1).normalize();
+      const normal = new Vector2(-localY.y, localY.x);
+      const rect = config.rect;
+      const mouseLocal = new Vector2(mouseCurrent.x - rect.left, rect.height - (mouseCurrent.y - rect.top));
+      const vecToMouse = new Vector2().subVectors(mouseLocal, new Vector2(center.x, center.y));
+      const distance = Math.abs(vecToMouse.dot(normal));
+      const range = distance * 2;
+      config.verticalRange = range;
+      rangeValue.x = range;
+    }
+    if (config.name === 'Coronal') {
+      if (dragMode === 'horizontalHandle') {
+        const targetRange1 = this.convertDeltaByRatio(coronalConfig, sagittalConfig, 'y', 'y', rangeValue.y);
+        sagittalConfig.horizontalRange = targetRange1;
+      } else if (dragMode === 'verticalHandle') {
+        const targetRange2 = this.convertDeltaByRatio(coronalConfig, axialConfig, 'x', 'x', rangeValue.x);
+        axialConfig.verticalRange = targetRange2;
+      }
+    } else if (config.name === 'Sagittal') {
+      if (dragMode === 'horizontalHandle') {
+        const targetRange1 = this.convertDeltaByRatio(sagittalConfig, coronalConfig, 'y', 'y', rangeValue.y);
+        coronalConfig.horizontalRange = targetRange1;
+      } else if (dragMode === 'verticalHandle') {
+        const targetRange2 = this.convertDeltaByRatio(sagittalConfig, axialConfig, 'x', 'y', rangeValue.x);
+        axialConfig.horizontalRange = targetRange2;
+      }
+    } else {
+      if (dragMode === 'horizontalHandle') {
+        const targetRange1 = this.convertDeltaByRatio(axialConfig, sagittalConfig, 'y', 'x', rangeValue.y);
+        sagittalConfig.verticalRange = targetRange1;
+      } else if (dragMode === 'verticalHandle') {
+        const targetRange2 = this.convertDeltaByRatio(axialConfig, coronalConfig, 'x', 'x', rangeValue.x);
+        coronalConfig.verticalRange = targetRange2;
+      }
+    }
+
+    this.onChange('range', config.name, rangeValue);
   }
   syncMatrix(name: 'Axial' | 'Sagittal' | 'Coronal', dragMode: TDragMode, mouseDelta: Vector2) {
     const axialConfig = this.crossConfigs.find(c => c.name === 'Axial')!;
@@ -352,7 +451,19 @@ export class CrossLine {
         break;
     }
   }
-  getDragMode(e: MouseEvent, config: TCrossConfig): 'center' | 'horizontal' | 'vertical' | 'rotate' | 'none' {
+  setHorizontalHandleVisible(config: TCrossConfig, visible: boolean) {
+    config.horizontalHandleTopLeft.visible = visible;
+    config.horizontalHandleTopRight.visible = visible;
+    config.horizontalHandleBottomLeft.visible = visible;
+    config.horizontalHandleBottomRight.visible = visible;
+  }
+  setVerticalHandleVisbile(config: TCrossConfig, visible: boolean) {
+    config.verticalHandleLeftTop.visible = visible;
+    config.verticalHandleLeftBottom.visible = visible;
+    config.verticalHandleRightTop.visible = visible;
+    config.verticalHandleRightBottom.visible = visible;
+  }
+  getDragMode(e: MouseEvent, config: TCrossConfig): TDragMode {
     const { rect } = config;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
@@ -366,6 +477,14 @@ export class CrossLine {
     this.raycaster.setFromCamera(mouseNDC, config.camera);
 
     const linesToCheck = [
+      config.horizontalHandleTopLeftHitbox,
+      config.horizontalHandleTopRightHitbox,
+      config.horizontalHandleBottomLeftHitbox,
+      config.horizontalHandleBottomRightHitbox,
+      config.verticalHandleLeftTopHitbox,
+      config.verticalHandleLeftBottomHitbox,
+      config.verticalHandleRightTopHitbox,
+      config.verticalHandleRightBottomHitbox,
       config.horizontalSolidLeftHitbox,
       config.horizontalSolidRightHitbox,
       config.verticalSolidTopHitbox,
@@ -375,6 +494,10 @@ export class CrossLine {
       config.verticalDashedTopHitbox,
       config.verticalDashedBottomHitbox,
       config.centerHitbox,
+      config.horizontalDashedTopHitbox,
+      config.horizontalDashedBottomHitbox,
+      config.verticalDashedLeftHitbox,
+      config.verticalDashedRightHitbox,
     ];
 
     const intersects = this.raycaster.intersectObjects(linesToCheck);
@@ -383,19 +506,44 @@ export class CrossLine {
       const intersectedObject = intersects[0].object;
 
       switch (intersectedObject) {
+        case config.horizontalHandleTopLeftHitbox:
+        case config.horizontalHandleTopRightHitbox:
+        case config.horizontalHandleBottomLeftHitbox:
+        case config.horizontalHandleBottomRightHitbox:
+          this.setHorizontalHandleVisible(config, true);
+          return 'horizontalHandle';
+        case config.verticalHandleLeftTopHitbox:
+        case config.verticalHandleLeftBottomHitbox:
+        case config.verticalHandleRightTopHitbox:
+        case config.verticalHandleRightBottomHitbox:
+          this.setVerticalHandleVisbile(config, true);
+          return 'verticalHandle';
         case config.centerHitbox:
           return 'center';
         case config.horizontalDashedLeftHitbox:
         case config.horizontalDashedRightHitbox:
+          this.setHorizontalHandleVisible(config, true);
           return 'horizontal';
         case config.verticalDashedTopHitbox:
         case config.verticalDashedBottomHitbox:
+          this.setVerticalHandleVisbile(config, true);
           return 'vertical';
         case config.horizontalSolidLeftHitbox:
         case config.horizontalSolidRightHitbox:
+          this.setHorizontalHandleVisible(config, true);
+          return 'rotate';
         case config.verticalSolidTopHitbox:
         case config.verticalSolidBottomHitbox:
+          this.setVerticalHandleVisbile(config, true);
           return 'rotate';
+        case config.horizontalDashedTopHitbox:
+        case config.horizontalDashedBottomHitbox:
+          this.setHorizontalHandleVisible(config, true);
+          return 'none';
+        case config.verticalDashedLeftHitbox:
+        case config.verticalDashedRightHitbox:
+          this.setVerticalHandleVisbile(config, true);
+          return 'none';
         default:
           return 'none';
       }
@@ -443,7 +591,7 @@ export class CrossLine {
     this.initcrossConfigs();
     this.updateAllCrosshairs();
   }
-  createLine(element: HTMLElement, color: TColors, dashed: boolean) {
+  createLine(element: HTMLElement, color: TColors, dashed: boolean, lineWidth: number = LINE_WIDTH) {
     const lineGeometry = new LineGeometry();
     const lineMaterial = new LineMaterial({ color: color, linewidth: LINE_WIDTH, dashed: false });
     lineMaterial.resolution.set(element.clientWidth, element.clientHeight);
@@ -451,6 +599,10 @@ export class CrossLine {
       lineMaterial.dashed = true;
       lineMaterial.dashSize = DASH_SIZE;
       lineMaterial.gapSize = GAP_SIZE;
+      if (lineWidth === 1) {
+        lineMaterial.transparent = true;
+        lineMaterial.opacity = 0.7;
+      }
     }
     const line = new Line2(lineGeometry, lineMaterial);
     return line;
@@ -468,7 +620,23 @@ export class CrossLine {
     const lineHitbox = new Line2(lineGeometry, hitboxMaterial);
     return lineHitbox;
   }
+  createHandlePlane(color: TColors) {
+    const planeGeometry = new PlaneGeometry(HANDLE_BOX_SIZE, HANDLE_BOX_SIZE);
+    const planeMaterial = new MeshBasicMaterial({ color: color });
+    const plane = new Mesh(planeGeometry, planeMaterial);
+    plane.visible = false;
+    return plane;
+  }
+  createHandleHitboxPlane() {
+    const planeGeometry = new PlaneGeometry(HANDLE_BOX_SIZE * 2, HANDLE_BOX_SIZE * 2);
+    const planeMaterial = new MeshBasicMaterial({ transparent: true, opacity: DEBUGGER_OPACITY, color: 0xff0000 });
+    const plane = new Mesh(planeGeometry, planeMaterial);
+    plane.visible = false;
+    return plane;
+  }
   createConfig(element: HTMLElement, name: 'Axial' | 'Sagittal' | 'Coronal') {
+    const horizontalRange = 0;
+    const verticalRange = 0;
     const rect = element.getBoundingClientRect();
     const totalCount = 0;
     const planePixelSize = new Vector2();
@@ -503,6 +671,23 @@ export class CrossLine {
     const horizontalDashedRight = this.createLine(element, horizontalColor, true);
     const verticalDashedTop = this.createLine(element, verticalColor, true);
     const verticalDashedBottom = this.createLine(element, verticalColor, true);
+    const horizontalDashedTop = this.createLine(element, horizontalColor, true, 1);
+    horizontalDashedTop.visible = false;
+    const horizontalDashedBottom = this.createLine(element, horizontalColor, true, 1);
+    horizontalDashedBottom.visible = false;
+    const verticalDashedLeft = this.createLine(element, verticalColor, true, 1);
+    verticalDashedLeft.visible = false;
+    const verticalDashedRight = this.createLine(element, verticalColor, true, 1);
+    verticalDashedRight.visible = false;
+
+    const horizontalHandleTopLeft = this.createHandlePlane(horizontalColor);
+    const horizontalHandleTopRight = this.createHandlePlane(horizontalColor);
+    const horizontalHandleBottomLeft = this.createHandlePlane(horizontalColor);
+    const horizontalHandleBottomRight = this.createHandlePlane(horizontalColor);
+    const verticalHandleLeftTop = this.createHandlePlane(verticalColor);
+    const verticalHandleLeftBottom = this.createHandlePlane(verticalColor);
+    const verticalHandleRightTop = this.createHandlePlane(verticalColor);
+    const verticalHandleRightBottom = this.createHandlePlane(verticalColor);
 
     const horizontalSolidLeftHitbox = this.createHitboxLine(element);
     const horizontalSolidRightHitbox = this.createHitboxLine(element);
@@ -512,6 +697,18 @@ export class CrossLine {
     const horizontalDashedRightHitbox = this.createHitboxLine(element);
     const verticalDashedTopHitbox = this.createHitboxLine(element);
     const verticalDashedBottomHitbox = this.createHitboxLine(element);
+    const horizontalDashedTopHitbox = this.createHitboxLine(element);
+    const horizontalDashedBottomHitbox = this.createHitboxLine(element);
+    const verticalDashedLeftHitbox = this.createHitboxLine(element);
+    const verticalDashedRightHitbox = this.createHitboxLine(element);
+    const horizontalHandleTopLeftHitbox = this.createHandleHitboxPlane();
+    const horizontalHandleTopRightHitbox = this.createHandleHitboxPlane();
+    const horizontalHandleBottomLeftHitbox = this.createHandleHitboxPlane();
+    const horizontalHandleBottomRightHitbox = this.createHandleHitboxPlane();
+    const verticalHandleLeftTopHitbox = this.createHandleHitboxPlane();
+    const verticalHandleLeftBottomHitbox = this.createHandleHitboxPlane();
+    const verticalHandleRightTopHitbox = this.createHandleHitboxPlane();
+    const verticalHandleRightBottomHitbox = this.createHandleHitboxPlane();
 
     const centerHitboxGeometry = new PlaneGeometry(CENTER_GAP_SIZE * 2, CENTER_GAP_SIZE * 2);
     const centerHitboxMaterial = new MeshBasicMaterial({ transparent: true, opacity: DEBUGGER_OPACITY, color: 0xff0000 });
@@ -526,6 +723,18 @@ export class CrossLine {
       horizontalDashedRight,
       verticalDashedTop,
       verticalDashedBottom,
+      horizontalDashedTop,
+      horizontalDashedBottom,
+      verticalDashedLeft,
+      verticalDashedRight,
+      horizontalHandleTopLeft,
+      horizontalHandleTopRight,
+      horizontalHandleBottomLeft,
+      horizontalHandleBottomRight,
+      verticalHandleLeftTop,
+      verticalHandleLeftBottom,
+      verticalHandleRightTop,
+      verticalHandleRightBottom,
       horizontalSolidLeftHitbox,
       horizontalSolidRightHitbox,
       verticalSolidTopHitbox,
@@ -534,6 +743,18 @@ export class CrossLine {
       horizontalDashedRightHitbox,
       verticalDashedTopHitbox,
       verticalDashedBottomHitbox,
+      horizontalDashedTopHitbox,
+      horizontalDashedBottomHitbox,
+      verticalDashedLeftHitbox,
+      verticalDashedRightHitbox,
+      horizontalHandleTopLeftHitbox,
+      horizontalHandleTopRightHitbox,
+      horizontalHandleBottomLeftHitbox,
+      horizontalHandleBottomRightHitbox,
+      verticalHandleLeftTopHitbox,
+      verticalHandleLeftBottomHitbox,
+      verticalHandleRightTopHitbox,
+      verticalHandleRightBottomHitbox,
       centerHitbox,
     );
     scene.add(crosshairGroup);
@@ -558,6 +779,18 @@ export class CrossLine {
       horizontalDashedRight,
       verticalDashedTop,
       verticalDashedBottom,
+      horizontalDashedTop,
+      horizontalDashedBottom,
+      verticalDashedLeft,
+      verticalDashedRight,
+      horizontalHandleTopLeft,
+      horizontalHandleTopRight,
+      horizontalHandleBottomLeft,
+      horizontalHandleBottomRight,
+      verticalHandleLeftTop,
+      verticalHandleLeftBottom,
+      verticalHandleRightTop,
+      verticalHandleRightBottom,
       horizontalSolidLeftHitbox,
       horizontalSolidRightHitbox,
       verticalSolidTopHitbox,
@@ -566,7 +799,21 @@ export class CrossLine {
       horizontalDashedRightHitbox,
       verticalDashedTopHitbox,
       verticalDashedBottomHitbox,
+      horizontalDashedTopHitbox,
+      horizontalDashedBottomHitbox,
+      verticalDashedLeftHitbox,
+      verticalDashedRightHitbox,
+      horizontalHandleTopLeftHitbox,
+      horizontalHandleTopRightHitbox,
+      horizontalHandleBottomLeftHitbox,
+      horizontalHandleBottomRightHitbox,
+      verticalHandleLeftTopHitbox,
+      verticalHandleLeftBottomHitbox,
+      verticalHandleRightTopHitbox,
+      verticalHandleRightBottomHitbox,
       centerHitbox,
+      horizontalRange,
+      verticalRange,
     };
 
     return config;
@@ -602,7 +849,7 @@ export class CrossLine {
   }
   updateAllCrosshairs() {
     this.crossConfigs.forEach(config => {
-      const { element, matrix, crosshairGroup } = config;
+      const { element, matrix, crosshairGroup, horizontalRange, verticalRange } = config;
 
       const { clientWidth, clientHeight } = element;
 
@@ -635,7 +882,61 @@ export class CrossLine {
       (config.verticalSolidBottom.geometry as LineGeometry).setPositions([0, vBottom, 0, 0, vDashedBottomEnd, 0]);
       (config.verticalDashedTop.geometry as LineGeometry).setPositions([0, vDashedTopEnd, 0, 0, vDashedTopStart, 0]);
       (config.verticalDashedBottom.geometry as LineGeometry).setPositions([0, vDashedBottomStart, 0, 0, vDashedBottomEnd, 0]);
+      (config.horizontalDashedTop.geometry as LineGeometry).setPositions([
+        hLeft,
+        horizontalRange / 2,
+        0,
+        hRight,
+        horizontalRange / 2,
+        0,
+      ]);
+      (config.horizontalDashedBottom.geometry as LineGeometry).setPositions([
+        hLeft,
+        -horizontalRange / 2,
+        0,
+        hRight,
+        -horizontalRange / 2,
+        0,
+      ]);
+      if (horizontalRange > 1) {
+        config.horizontalDashedTop.visible = true;
+        config.horizontalDashedBottom.visible = true;
+      } else {
+        config.horizontalDashedTop.visible = false;
+        config.horizontalDashedBottom.visible = false;
+      }
+      (config.verticalDashedLeft.geometry as LineGeometry).setPositions([
+        verticalRange / 2,
+        vTop,
+        0,
+        verticalRange / 2,
+        vBottom,
+        0,
+      ]);
+      (config.verticalDashedRight.geometry as LineGeometry).setPositions([
+        -verticalRange / 2,
+        vTop,
+        0,
+        -verticalRange / 2,
+        vBottom,
+        0,
+      ]);
+      if (verticalRange > 1) {
+        config.verticalDashedLeft.visible = true;
+        config.verticalDashedRight.visible = true;
+      } else {
+        config.verticalDashedLeft.visible = false;
+        config.verticalDashedRight.visible = false;
+      }
 
+      config.horizontalHandleTopLeft.position.set(hDashedLeftStart - 15, horizontalRange / 2, 0);
+      config.horizontalHandleTopRight.position.set(hDashedRightEnd + 15, horizontalRange / 2, 0);
+      config.horizontalHandleBottomLeft.position.set(hDashedLeftStart - 15, -horizontalRange / 2, 0);
+      config.horizontalHandleBottomRight.position.set(hDashedRightEnd + 15, -horizontalRange / 2, 0);
+      config.verticalHandleLeftTop.position.set(verticalRange / 2, vDashedTopStart + 15, 0);
+      config.verticalHandleLeftBottom.position.set(verticalRange / 2, vDashedBottomEnd - 15, 0);
+      config.verticalHandleRightTop.position.set(-verticalRange / 2, vDashedTopStart + 15, 0);
+      config.verticalHandleRightBottom.position.set(-verticalRange / 2, vDashedBottomEnd - 15, 0);
       // 更新热区线段
       (config.horizontalSolidLeftHitbox.geometry as LineGeometry).setPositions([hLeft, 0, 0, hDashedLeftStart, 0, 0]);
       (config.horizontalSolidRightHitbox.geometry as LineGeometry).setPositions([hDashedRightEnd, 0, 0, hRight, 0, 0]);
@@ -659,6 +960,46 @@ export class CrossLine {
         vDashedBottomEnd,
         0,
       ]);
+      (config.horizontalDashedTopHitbox.geometry as LineGeometry).setPositions([
+        hLeft,
+        horizontalRange / 2,
+        0,
+        hRight,
+        horizontalRange / 2,
+        0,
+      ]);
+      (config.horizontalDashedBottomHitbox.geometry as LineGeometry).setPositions([
+        hLeft,
+        -horizontalRange / 2,
+        0,
+        hRight,
+        -horizontalRange / 2,
+        0,
+      ]);
+      (config.verticalDashedLeftHitbox.geometry as LineGeometry).setPositions([
+        verticalRange / 2,
+        vTop,
+        0,
+        verticalRange / 2,
+        vBottom,
+        0,
+      ]);
+      (config.verticalDashedRightHitbox.geometry as LineGeometry).setPositions([
+        -verticalRange / 2,
+        vTop,
+        0,
+        -verticalRange / 2,
+        vBottom,
+        0,
+      ]);
+      config.horizontalHandleTopLeftHitbox.position.set(hDashedLeftStart - 15, horizontalRange / 2, 0);
+      config.horizontalHandleTopRightHitbox.position.set(hDashedRightEnd + 15, horizontalRange / 2, 0);
+      config.horizontalHandleBottomLeftHitbox.position.set(hDashedLeftStart - 15, -horizontalRange / 2, 0);
+      config.horizontalHandleBottomRightHitbox.position.set(hDashedRightEnd + 15, -horizontalRange / 2, 0);
+      config.verticalHandleLeftTopHitbox.position.set(verticalRange / 2, vDashedTopStart + 15, 0);
+      config.verticalHandleLeftBottomHitbox.position.set(verticalRange / 2, vDashedBottomEnd - 15, 0);
+      config.verticalHandleRightTopHitbox.position.set(-verticalRange / 2, vDashedTopStart + 15, 0);
+      config.verticalHandleRightBottomHitbox.position.set(-verticalRange / 2, vDashedBottomEnd - 15, 0);
 
       // 3. 重新计算线段距离 (Fat Lines 需要)
       config.scene.children.forEach(child => {

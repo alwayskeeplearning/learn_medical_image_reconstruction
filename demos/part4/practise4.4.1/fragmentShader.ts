@@ -18,7 +18,7 @@ const fragmentShader = `
   // 从顶点着色器传入的 UV 坐标
   in vec2 vUv;
 
-  layout(location = 0) out vec4 outColor;
+  out vec4 outColor;
 
   void main() {
     vec3 patientPos = uOrigin + vUv.x * uXAxis * uPlaneWidth + vUv.y * uYAxis * uPlaneHeight;
@@ -33,7 +33,7 @@ const fragmentShader = `
     
     vec3 sampleCoord = (voxelPos + vec3(0.5)) / uTextureSize;
     float intensity = 0.0;
-    if (uSampleCount > 0) {
+    if (uSampleCount > 1) {
       float slabThickness = uSamplingInterval * float(uSampleCount);
       vec3 rayDir = normalize(cross(uXAxis, uYAxis));
       
@@ -51,7 +51,6 @@ const fragmentShader = `
       // 3. 计算总步进向量和每一步的步长
       vec3 slabVec = endTex - startTex;
       vec3 step = slabVec / float(uSampleCount - 1);
-      
       float maxVal = -3000.0;
 
       for (int i = 0; i < uSampleCount; i++) {

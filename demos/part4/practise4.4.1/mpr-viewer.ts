@@ -168,7 +168,7 @@ class MPRViewer {
     }
 
     const material = view.mesh.material as TShaderMaterial;
-    const { uXAxis, uYAxis, uOrigin, uSamplingInterval, uSampleCount } = material.uniforms;
+    const { uXAxis, uYAxis, uOrigin, uSamplingInterval } = material.uniforms;
 
     // 2. 确定旋转轴
     // 我们需要复制一份原始向量作为旋转轴，避免在计算过程中被修改
@@ -227,7 +227,6 @@ class MPRViewer {
       this.changeSlice(currentCount, 'axial');
     }
     uSamplingInterval.value = sliceInfo.samplingInterval;
-    uSampleCount.value = 50;
 
     const planePixelSize = this.getPlanePixelSize(view);
     this.onResize(view.name, planePixelSize, sliceInfo.count);
@@ -400,13 +399,10 @@ class MPRViewer {
     this.sagittalSliceInfo = this.calculateSliceInfoForDirection(2);
     (this.viewConfigs[0].mesh.material as TShaderMaterial).uniforms.uSamplingInterval.value =
       this.axialSliceInfo.samplingInterval;
-    (this.viewConfigs[0].mesh.material as TShaderMaterial).uniforms.uSampleCount.value = 50;
     (this.viewConfigs[1].mesh.material as TShaderMaterial).uniforms.uSamplingInterval.value =
       this.coronalSliceInfo.samplingInterval;
-    (this.viewConfigs[1].mesh.material as TShaderMaterial).uniforms.uSampleCount.value = 50;
     (this.viewConfigs[2].mesh.material as TShaderMaterial).uniforms.uSamplingInterval.value =
       this.sagittalSliceInfo.samplingInterval;
-    (this.viewConfigs[2].mesh.material as TShaderMaterial).uniforms.uSampleCount.value = 50;
     this.handleResize();
     return {
       axialCount: this.axialSliceInfo.count,
@@ -465,6 +461,30 @@ class MPRViewer {
 
       this.changeSlice(this.axialSliceInfo.currentCount, 'axial');
     }
+  }
+  changeRange(rangeInPixels: number, orientation: string, axis: 'x' | 'y') {
+    console.log(rangeInPixels, orientation, axis);
+    const config = this.viewConfigs.find(c => c.name.toLowerCase() === orientation.toLowerCase());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sliceInfo = (this as any)[`${orientation}SliceInfo`] as TSizeInfo;
+    if (!config || !sliceInfo || sliceInfo.samplingInterval === 0) return;
+
+    const material = config.mesh.material as TShaderMaterial;
+    const planePixelSize = this.getPlanePixelSize(config);
+    if (planePixelSize.x === 0 || planePixelSize.y === 0) return;
+
+    // 只用对应轴的 mm/px，避免放大
+    const planeMM = axis === 'x' ? material.uniforms.uPlaneWidth.value : material.uniforms.uPlaneHeight.value;
+    const planePX = axis === 'x' ? planePixelSize.x : planePixelSize.y;
+    const mmPerPixel = planeMM / planePX;
+
+    const slabThicknessMM = rangeInPixels * mmPerPixel;
+
+    let sampleCount = Math.round(slabThicknessMM / sliceInfo.samplingInterval);
+    if (sampleCount < 0) sampleCount = 0;
+    if (sliceInfo.count > 0 && sampleCount > sliceInfo.count) sampleCount = sliceInfo.count; // 限制到可用厚度
+
+    material.uniforms.uSampleCount.value = sampleCount;
   }
 }
 

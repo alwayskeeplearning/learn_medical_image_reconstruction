@@ -39,24 +39,24 @@ const setupGui = (
     .onChange(() => {
       viewer.setWWWC(guiState.windowWidth, guiState.windowCenter);
     });
-  gui
-    .add(guiState, 'axialOffset', 1, axialCount, 1)
-    .name('轴位切片')
-    .onChange(() => {
-      viewer.changeSlice(guiState.axialOffset, 'axial');
-    });
-  gui
-    .add(guiState, 'coronalOffset', 1, coronalCount, 1)
-    .name('冠状位切片')
-    .onChange(() => {
-      viewer.changeSlice(guiState.coronalOffset, 'coronal');
-    });
-  gui
-    .add(guiState, 'sagittalOffset', 1, sagittalCount, 1)
-    .name('矢状位切片')
-    .onChange(() => {
-      viewer.changeSlice(guiState.sagittalOffset, 'sagittal');
-    });
+  // gui
+  //   .add(guiState, 'axialOffset', 1, axialCount, 1)
+  //   .name('轴位切片')
+  //   .onChange(() => {
+  //     viewer.changeSlice(guiState.axialOffset, 'axial');
+  //   });
+  // gui
+  //   .add(guiState, 'coronalOffset', 1, coronalCount, 1)
+  //   .name('冠状位切片')
+  //   .onChange(() => {
+  //     viewer.changeSlice(guiState.coronalOffset, 'coronal');
+  //   });
+  // gui
+  //   .add(guiState, 'sagittalOffset', 1, sagittalCount, 1)
+  //   .name('矢状位切片')
+  //   .onChange(() => {
+  //     viewer.changeSlice(guiState.sagittalOffset, 'sagittal');
+  //   });
 };
 
 const lastAngles = {
@@ -97,8 +97,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   console.log('metaData', metaData);
   (window as any).viewer = viewer;
-  viewer.init(texture, metaData);
-  // setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialCount, coronalCount, sagittalCount);
+  const { axialCount, coronalCount, sagittalCount } = viewer.init(texture, metaData);
+  setupGui(viewer, metaData.windowWidth, metaData.windowCenter, axialCount, coronalCount, sagittalCount);
   const onChange = (action: string, name: 'Axial' | 'Sagittal' | 'Coronal', value: any) => {
     if (action === 'rotate') {
       const currentAngle = value;
@@ -123,7 +123,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         viewer.rotateView('Coronal', 'x', tiltAngle2, deltaAngle);
       }
       lastAngles[name] = currentAngle;
-    } else {
+    } else if (action === 'translate') {
       if (name === 'Axial') {
         const coronalDelta = Math.floor(value.y) - lastTranslates['Coronal'];
         const sagittalDelta = Math.floor(value.x) - lastTranslates['Sagittal'];
@@ -145,6 +145,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         viewer.changeSliceDelta(coronalDelta, 'coronal');
         lastTranslates['Axial'] = Math.floor(value.y);
         lastTranslates['Coronal'] = Math.floor(value.x);
+      }
+    } else {
+      if (name === 'Axial') {
+        if (value.y !== -1) viewer.changeRange(value.y, 'coronal', 'y'); // 用目标视图“自己的像素范围”
+        if (value.x !== -1) viewer.changeRange(value.x, 'sagittal', 'x');
+      } else if (name === 'Coronal') {
+        if (value.y !== -1) viewer.changeRange(value.y, 'axial', 'y');
+        if (value.x !== -1) viewer.changeRange(value.x, 'sagittal', 'x');
+      } else if (name === 'Sagittal') {
+        if (value.y !== -1) viewer.changeRange(value.y, 'axial', 'x');
+        if (value.x !== -1) viewer.changeRange(value.x, 'coronal', 'y');
       }
     }
   };
